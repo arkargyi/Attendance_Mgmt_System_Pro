@@ -578,6 +578,38 @@ function HistoryView({ attendances, showNotification, onEmployeeClick }) {
     await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'attendances', id));
   };
 
+  const exportToCSV = () => {
+    if (sortedAndFilteredRecords.length === 0) {
+      showNotification("No records to export.", "error");
+      return;
+    }
+
+    const headers = ["Date", "Emp ID", "Name", "Department", "Status", "Recorded At"];
+    const csvRows = [headers.join(",")];
+
+    sortedAndFilteredRecords.forEach(record => {
+      const row = [
+        record.date,
+        record.empId,
+        `"${record.empName}"`,
+        `"${getDeptName(record.departmentId || record.department)}"`,
+        record.status,
+        `"${record.timestamp ? new Date(record.timestamp).toLocaleString() : 'N/A'}"`
+      ];
+      csvRows.push(row.join(","));
+    });
+
+    const csvContent = csvRows.join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `attendance_export_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const SortableHeader = ({ label, sortKey }) => (
     <th className="p-4 font-medium cursor-pointer hover:bg-slate-100 select-none" onClick={() => requestSort(sortKey)}>
       <div className="flex items-center gap-1">
@@ -597,12 +629,21 @@ function HistoryView({ attendances, showNotification, onEmployeeClick }) {
       </header>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200">
-        <div className="p-4 border-b border-slate-200 bg-slate-50 flex gap-4">
-          <input type="date" value={filterDate} onChange={(e) => setFilterDate(e.target.value)} className="border rounded-md p-2 text-sm" />
-          <select value={filterDept} onChange={(e) => setFilterDept(e.target.value)} className="border rounded-md p-2 text-sm">
-            <option value="">All Departments</option>
-            {MASTER_DEPARTMENTS.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-          </select>
+        <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-4">
+          <div className="flex gap-4">
+            <input type="date" value={filterDate} onChange={(e) => setFilterDate(e.target.value)} className="border rounded-md p-2 text-sm" />
+            <select value={filterDept} onChange={(e) => setFilterDept(e.target.value)} className="border rounded-md p-2 text-sm">
+              <option value="">All Departments</option>
+              {MASTER_DEPARTMENTS.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+          </div>
+          <button 
+            onClick={exportToCSV}
+            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+          >
+            <Download size={16} />
+            Export CSV
+          </button>
         </div>
 
         <div className="overflow-x-auto">
