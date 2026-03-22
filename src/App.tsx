@@ -3,19 +3,25 @@ import {
   Users, CalendarCheck, BarChart3, History, Settings, LogOut, 
   UploadCloud, Download, Trash2, Edit, AlertTriangle, CheckSquare, 
   Square, Search, Plus, ChevronUp, ChevronDown, ShieldAlert, Key,
-  Filter, X
+  Filter, X, Clock
 } from 'lucide-react';
 import Fuse from 'fuse.js';
 import { initializeApp } from 'firebase/app';
 import { 
   getAuth, onAuthStateChanged, signOut,
   createUserWithEmailAndPassword, signInWithEmailAndPassword,
-  setPersistence, browserLocalPersistence, GoogleAuthProvider, signInWithPopup
+  setPersistence, browserLocalPersistence, GoogleAuthProvider, signInWithPopup,
+  sendPasswordResetEmail
 } from 'firebase/auth';
 import { 
   getFirestore, collection, onSnapshot, addDoc, updateDoc, 
   deleteDoc, doc, writeBatch, setDoc, getDocs
 } from 'firebase/firestore';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { 
+  PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer, 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend 
+} from 'recharts';
 
 // --- Firebase Initialization ---
 const firebaseConfig = {
@@ -30,6 +36,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const storage = getStorage(app);
 const appId = 'attendance-pro-production';
 
 // --- ERP Relational Data Structure ---
@@ -69,6 +76,7 @@ export default function App() {
   const [employees, setEmployees] = useState([]);
   const [attendances, setAttendances] = useState([]);
   const [appUsers, setAppUsers] = useState([]);
+  const [shifts, setShifts] = useState([]);
   
   const [loading, setLoading] = useState(true);
   const [notification, setNotification] = useState(null);
@@ -107,6 +115,7 @@ export default function App() {
     const empRef = collection(db, 'artifacts', appId, 'public', 'data', 'employees');
     const attRef = collection(db, 'artifacts', appId, 'public', 'data', 'attendances');
     const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'app_users'); // Global users list
+    const shiftsRef = collection(db, 'artifacts', appId, 'public', 'data', 'shifts');
 
     const handleFirebaseError = (error) => {
       if (error.code === 'permission-denied') {
@@ -144,7 +153,11 @@ export default function App() {
       setLoading(false);
     }, handleFirebaseError);
 
-    return () => { unsubEmp(); unsubAtt(); unsubUsers(); };
+    const unsubShifts = onSnapshot(shiftsRef, (snapshot) => {
+      setShifts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, handleFirebaseError);
+
+    return () => { unsubEmp(); unsubAtt(); unsubUsers(); unsubShifts(); };
   }, [user]);
 
   const handleEmailAuth = async (e) => {
@@ -172,6 +185,19 @@ export default function App() {
       }
     } catch (error) {
       showNotification(error.message, 'error');
+    }
+  };
+
+  const handlePasswordReset = async () => {
+    if (!email) {
+      showNotification("Please enter your email address first.", "error");
+      return;
+    }
+    try {
+      await sendPasswordResetEmail(auth, email);
+      showNotification("Password reset email sent! Please check your inbox.");
+    } catch (error) {
+      showNotification(error.message, "error");
     }
   };
 
@@ -214,7 +240,14 @@ export default function App() {
               <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-blue-500" placeholder="admin@erp.com" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
+              <div className="flex justify-between items-center mb-1">
+                <label className="block text-sm font-medium text-slate-700">Password</label>
+                {authMode === 'login' && (
+                  <button type="button" onClick={handlePasswordReset} className="text-xs text-blue-600 hover:underline">
+                    Forgot Password?
+                  </button>
+                )}
+              </div>
               <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-blue-500" placeholder="••••••••" />
             </div>
             <button type="submit" className="w-full bg-slate-800 hover:bg-slate-900 text-white py-3 px-4 rounded-lg font-medium transition-colors">
@@ -269,6 +302,7 @@ export default function App() {
             <>
               <SidebarItem icon={<History />} label="Records History" active={currentView === 'history'} onClick={() => setCurrentView('history')} />
               <SidebarItem icon={<Users />} label="Employee Mgt" active={currentView === 'employees'} onClick={() => setCurrentView('employees')} />
+              <SidebarItem icon={<Clock />} label="Shifts" active={currentView === 'shifts'} onClick={() => setCurrentView('shifts')} />
             </>
           )}
 
@@ -322,12 +356,13 @@ export default function App() {
               {currentView === 'submit' && <SubmitAttendanceView employees={employees} attendances={attendances} showNotification={showNotification} />}
               
               {/* Protected Routes Handling */}
-              {['Admin', 'Super Admin'].includes(currentUserRole) && currentView === 'history' && <HistoryView attendances={attendances} showNotification={showNotification} onEmployeeClick={(id) => { setPreviousView(currentView); setSelectedEmployeeId(id); setCurrentView('employeeProfile'); }} />}
-              {['Admin', 'Super Admin'].includes(currentUserRole) && currentView === 'employees' && <EmployeeManagementView employees={employees} showNotification={showNotification} onEmployeeClick={(id) => { setPreviousView(currentView); setSelectedEmployeeId(id); setCurrentView('employeeProfile'); }} />}
+              {['Admin', 'Super Admin'].includes(currentUserRole) && currentView === 'history' && <HistoryView attendances={attendances} employees={employees} showNotification={showNotification} onEmployeeClick={(id) => { setPreviousView(currentView); setSelectedEmployeeId(id); setCurrentView('employeeProfile'); }} />}
+              {['Admin', 'Super Admin'].includes(currentUserRole) && currentView === 'employees' && <EmployeeManagementView employees={employees} shifts={shifts} showNotification={showNotification} onEmployeeClick={(id) => { setPreviousView(currentView); setSelectedEmployeeId(id); setCurrentView('employeeProfile'); }} />}
+              {['Admin', 'Super Admin'].includes(currentUserRole) && currentView === 'shifts' && <ShiftsView shifts={shifts} showNotification={showNotification} />}
               
               {currentUserRole === 'Super Admin' && currentView === 'settings' && <SettingsView appUsers={appUsers} showNotification={showNotification} currentUid={user.uid} />}
               
-              {currentView === 'employeeProfile' && <EmployeeProfileView employeeId={selectedEmployeeId} employees={employees} attendances={attendances} appUsers={appUsers} onBack={() => setCurrentView(previousView)} />}
+              {currentView === 'employeeProfile' && <EmployeeProfileView employeeId={selectedEmployeeId} employees={employees} attendances={attendances} appUsers={appUsers} shifts={shifts} onBack={() => setCurrentView(previousView)} showNotification={showNotification} />}
             </>
           )}
         </div>
@@ -374,9 +409,39 @@ function DashboardView({ employees, attendances }) {
       .filter(a => a.status === detailStatus)
       .map(a => {
         const emp = employees.find(e => e.empId === a.empId);
-        return { ...a, empName: emp ? emp.name : 'Unknown' };
+        return { ...a, empName: emp ? emp.name : 'Unknown', photoUrl: emp?.photoUrl };
       });
   }, [todaysRecords, detailStatus, employees]);
+
+  const pieData = useMemo(() => {
+    return [
+      { name: 'Present', value: stats.present, color: '#22c55e' },
+      { name: 'Leave', value: stats.leave, color: '#eab308' },
+      { name: 'Absent', value: stats.absent, color: '#ef4444' },
+      { name: 'Late', value: stats.late, color: '#f97316' },
+      { name: 'Half-Day', value: stats.halfDay, color: '#a855f7' },
+    ].filter(d => d.value > 0);
+  }, [stats]);
+
+  const last7DaysData = useMemo(() => {
+    const dates = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(selectedDate);
+      d.setDate(d.getDate() - i);
+      dates.push(d.toISOString().split('T')[0]);
+    }
+    return dates.map(date => {
+      const records = attendances.filter(a => a.date === date);
+      return {
+        date: date.substring(5), // MM-DD
+        Present: records.filter(a => a.status === 'Present').length,
+        Leave: records.filter(a => a.status === 'Leave').length,
+        Absent: records.filter(a => a.status === 'Absent').length,
+        Late: records.filter(a => a.status === 'Late').length,
+        'Half-Day': records.filter(a => a.status === 'Half-Day').length,
+      };
+    });
+  }, [attendances, selectedDate]);
 
   return (
     <div className="space-y-6 animate-fadeIn">
@@ -466,7 +531,16 @@ function DashboardView({ employees, attendances }) {
                 {detailEmployees.length > 0 ? detailEmployees.map((record, idx) => (
                   <tr key={idx} className="hover:bg-slate-50 transition-colors">
                     <td className="p-4 text-sm font-mono text-slate-600">{record.empId}</td>
-                    <td className="p-4 text-sm font-medium text-slate-800">{record.empName}</td>
+                    <td className="p-4 text-sm font-medium text-slate-800 flex items-center gap-3">
+                      <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-[10px] font-bold shadow-inner overflow-hidden flex-shrink-0">
+                        {record.photoUrl ? (
+                          <img src={record.photoUrl} alt={record.empName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        ) : (
+                          record.empName.charAt(0).toUpperCase()
+                        )}
+                      </div>
+                      {record.empName}
+                    </td>
                     <td className="p-4 text-sm text-slate-600">{getDeptName(record.departmentId || record.department)}</td>
                     <td className="p-4 text-sm text-slate-500">
                       {record.timestamp ? new Date(record.timestamp).toLocaleTimeString() : 'N/A'}
@@ -485,6 +559,55 @@ function DashboardView({ employees, attendances }) {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+          <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2"><BarChart3 size={18}/> Today's Attendance</h3>
+          <div className="h-64">
+            {pieData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={pieData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={80}
+                    paddingAngle={5}
+                    dataKey="value"
+                  >
+                    {pieData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <RechartsTooltip />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-slate-400 italic">No attendance data for today</div>
+            )}
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+          <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2"><BarChart3 size={18}/> Last 7 Days Trend</h3>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={last7DaysData}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} />
+                <RechartsTooltip cursor={{ fill: '#f1f5f9' }} />
+                <Legend iconType="circle" wrapperStyle={{ fontSize: '12px' }} />
+                <Bar dataKey="Present" stackId="a" fill="#22c55e" radius={[0, 0, 4, 4]} />
+                <Bar dataKey="Leave" stackId="a" fill="#eab308" />
+                <Bar dataKey="Absent" stackId="a" fill="#ef4444" />
+                <Bar dataKey="Late" stackId="a" fill="#f97316" />
+                <Bar dataKey="Half-Day" stackId="a" fill="#a855f7" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm lg:col-span-2">
           <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2"><Users size={18}/> Employee Breakdown</h3>
           <div className="flex gap-4 text-center">
             <div className="flex-1 p-4 bg-blue-50 border border-blue-100 rounded-lg"><div className="text-2xl font-bold text-blue-700">{activeCount}</div><div className="text-sm font-medium text-blue-600">Active</div></div>
@@ -660,13 +783,13 @@ function SubmitAttendanceView({ employees, attendances, showNotification }) {
 // ==========================================
 // 3. HISTORY VIEW
 // ==========================================
-function HistoryView({ attendances, showNotification, onEmployeeClick }) {
+function HistoryView({ attendances, employees, showNotification, onEmployeeClick }) {
   const today = new Date().toISOString().split('T')[0];
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
   const [filterDept, setFilterDept] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
-  const [filterName, setFilterName] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
@@ -685,11 +808,16 @@ function HistoryView({ attendances, showNotification, onEmployeeClick }) {
       
       const matchDept = filterDept ? a.departmentId === filterDept : true;
       const matchStatus = filterStatus ? a.status === filterStatus : true;
-      const matchName = filterName 
-        ? (a.empName?.toLowerCase().includes(filterName.toLowerCase()) || a.empId?.toLowerCase().includes(filterName.toLowerCase()))
+      const matchSearch = searchQuery 
+        ? (
+            a.empName?.toLowerCase().includes(searchQuery.toLowerCase()) || 
+            a.empId?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            a.status?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            getDeptName(a.departmentId || a.department)?.toLowerCase().includes(searchQuery.toLowerCase())
+          )
         : true;
 
-      return matchDateRange && matchDept && matchStatus && matchName;
+      return matchDateRange && matchDept && matchStatus && matchSearch;
     });
 
     if (sortConfig.key) {
@@ -706,7 +834,7 @@ function HistoryView({ attendances, showNotification, onEmployeeClick }) {
       });
     }
     return filtered;
-  }, [attendances, startDate, endDate, filterDept, filterStatus, filterName, sortConfig]);
+  }, [attendances, startDate, endDate, filterDept, filterStatus, searchQuery, sortConfig]);
 
   const handleDelete = async (id) => {
     if (!window.confirm("Are you sure you want to delete this record?")) return;
@@ -807,14 +935,14 @@ function HistoryView({ attendances, showNotification, onEmployeeClick }) {
               </select>
             </div>
             <div className="lg:col-span-2">
-              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Search Employee</label>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Search</label>
               <div className="relative">
                 <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
                 <input 
                   type="text" 
-                  placeholder="Name or ID..." 
-                  value={filterName} 
-                  onChange={(e) => setFilterName(e.target.value)} 
+                  placeholder="Search name, ID, status, or dept..." 
+                  value={searchQuery} 
+                  onChange={(e) => setSearchQuery(e.target.value)} 
                   className="w-full pl-10 pr-4 py-2 border rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500" 
                 />
               </div>
@@ -826,7 +954,7 @@ function HistoryView({ attendances, showNotification, onEmployeeClick }) {
                   setEndDate(today);
                   setFilterDept('');
                   setFilterStatus('');
-                  setFilterName('');
+                  setSearchQuery('');
                 }}
                 className="text-sm text-red-600 hover:text-red-800 font-medium flex items-center gap-1"
               >
@@ -849,18 +977,30 @@ function HistoryView({ attendances, showNotification, onEmployeeClick }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {sortedAndFilteredRecords.map(record => (
-                <tr key={record.id} className="hover:bg-slate-50 transition-colors">
-                  <td className="p-4">{record.date}</td>
-                  <td className="p-4 font-medium text-blue-600 cursor-pointer hover:underline" onClick={() => onEmployeeClick && onEmployeeClick(record.empId)}>{record.empId}</td>
-                  <td className="p-4 cursor-pointer hover:text-blue-600" onClick={() => onEmployeeClick && onEmployeeClick(record.empId)}>{record.empName}</td>
-                  <td className="p-4">{getDeptName(record.departmentId || record.department)}</td>
-                  <td className="p-4"><span className="px-2 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700">{record.status}</span></td>
-                  <td className="p-4 text-right">
-                    <button onClick={() => handleDelete(record.id)} className="text-red-500 hover:text-red-700 transition-colors"><Trash2 size={16}/></button>
-                  </td>
-                </tr>
-              ))}
+              {sortedAndFilteredRecords.map(record => {
+                const emp = employees?.find(e => e.empId === record.empId);
+                return (
+                  <tr key={record.id} className="hover:bg-slate-50 transition-colors">
+                    <td className="p-4">{record.date}</td>
+                    <td className="p-4 font-medium text-blue-600 cursor-pointer hover:underline" onClick={() => onEmployeeClick && onEmployeeClick(record.empId)}>{record.empId}</td>
+                    <td className="p-4 cursor-pointer hover:text-blue-600 flex items-center gap-3" onClick={() => onEmployeeClick && onEmployeeClick(record.empId)}>
+                      <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-bold shadow-inner overflow-hidden flex-shrink-0">
+                        {emp?.photoUrl ? (
+                          <img src={emp.photoUrl} alt={record.empName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        ) : (
+                          record.empName?.charAt(0).toUpperCase() || '?'
+                        )}
+                      </div>
+                      {record.empName}
+                    </td>
+                    <td className="p-4">{getDeptName(record.departmentId || record.department)}</td>
+                    <td className="p-4"><span className="px-2 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700">{record.status}</span></td>
+                    <td className="p-4 text-right">
+                      <button onClick={() => handleDelete(record.id)} className="text-red-500 hover:text-red-700 transition-colors"><Trash2 size={16}/></button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -873,11 +1013,11 @@ function HistoryView({ attendances, showNotification, onEmployeeClick }) {
 // ==========================================
 // 4. EMPLOYEE MANAGEMENT VIEW
 // ==========================================
-function EmployeeManagementView({ employees, showNotification, onEmployeeClick }) {
+function EmployeeManagementView({ employees, shifts, showNotification, onEmployeeClick }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const [form, setForm] = useState({ empId: '', name: '', departmentId: MASTER_DEPARTMENTS[0].id, status: 'Active', resignDate: '' });
+  const [form, setForm] = useState({ empId: '', name: '', departmentId: MASTER_DEPARTMENTS[0].id, status: 'Active', resignDate: '', shiftId: '' });
 
   const [sortConfig, setSortConfig] = useState({ key: 'empId', direction: 'asc' });
 
@@ -924,10 +1064,10 @@ function EmployeeManagementView({ employees, showNotification, onEmployeeClick }
     if (emp) {
       setEditingId(emp.id);
       const currentDeptId = emp.departmentId || getDeptId(emp.department);
-      setForm({ empId: emp.empId, name: emp.name, departmentId: currentDeptId, status: emp.status, resignDate: emp.resignDate || '' });
+      setForm({ empId: emp.empId, name: emp.name, departmentId: currentDeptId, status: emp.status, resignDate: emp.resignDate || '', shiftId: emp.shiftId || '' });
     } else {
       setEditingId(null);
-      setForm({ empId: '', name: '', departmentId: MASTER_DEPARTMENTS[0].id, status: 'Active', resignDate: '' });
+      setForm({ empId: '', name: '', departmentId: MASTER_DEPARTMENTS[0].id, status: 'Active', resignDate: '', shiftId: '' });
     }
     setIsFormOpen(true);
   };
@@ -989,7 +1129,8 @@ function EmployeeManagementView({ employees, showNotification, onEmployeeClick }
                 name: row.Name,
                 departmentId: deptId,
                 status: row.Status || 'Active',
-                resignDate: row.ResignDate || ''
+                resignDate: row.ResignDate || '',
+                shiftId: row.Shift_ID || ''
               });
               count++;
             }
@@ -1039,13 +1180,20 @@ function EmployeeManagementView({ employees, showNotification, onEmployeeClick }
 
       {isFormOpen && (
         <div className="mb-6 bg-white p-6 rounded-xl border border-blue-200 shadow-sm animate-fadeIn">
-          <form onSubmit={handleSave} className="grid grid-cols-1 md:grid-cols-5 gap-4">
+          <form onSubmit={handleSave} className="grid grid-cols-1 md:grid-cols-6 gap-4">
             <div><label className="block text-xs font-medium text-slate-600 mb-1">Emp ID</label><input required value={form.empId} onChange={e => setForm({...form, empId: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500" /></div>
             <div><label className="block text-xs font-medium text-slate-600 mb-1">Name</label><input required value={form.name} onChange={e => setForm({...form, name: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500" /></div>
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">Department</label>
               <select required value={form.departmentId} onChange={e => setForm({...form, departmentId: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500">
                 {MASTER_DEPARTMENTS.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Shift</label>
+              <select value={form.shiftId} onChange={e => setForm({...form, shiftId: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500">
+                <option value="">-- No Shift --</option>
+                {shifts.map(s => <option key={s.id} value={s.id}>{s.name} ({s.startTime} - {s.endTime})</option>)}
               </select>
             </div>
             <div>
@@ -1080,6 +1228,7 @@ function EmployeeManagementView({ employees, showNotification, onEmployeeClick }
                 <SortableHeader label="Emp ID" sortKey="empId" />
                 <SortableHeader label="Name" sortKey="name" />
                 <SortableHeader label="Department (Relational)" sortKey="departmentId" />
+                <SortableHeader label="Shift" sortKey="shiftId" />
                 <SortableHeader label="Status" sortKey="status" />
                 <th className="p-4 font-medium text-right">Actions</th>
               </tr>
@@ -1088,8 +1237,18 @@ function EmployeeManagementView({ employees, showNotification, onEmployeeClick }
               {sortedAndFilteredEmployees.map(emp => (
                 <tr key={emp.id} className="hover:bg-slate-50 transition-colors">
                   <td className="p-4 font-medium text-blue-600 cursor-pointer hover:underline" onClick={() => onEmployeeClick && onEmployeeClick(emp.empId)}>{emp.empId}</td>
-                  <td className="p-4 cursor-pointer hover:text-blue-600" onClick={() => onEmployeeClick && onEmployeeClick(emp.empId)}>{emp.name}</td>
+                  <td className="p-4 cursor-pointer hover:text-blue-600 flex items-center gap-3" onClick={() => onEmployeeClick && onEmployeeClick(emp.empId)}>
+                    <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-bold shadow-inner overflow-hidden flex-shrink-0">
+                      {emp.photoUrl ? (
+                        <img src={emp.photoUrl} alt={emp.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      ) : (
+                        emp.name.charAt(0).toUpperCase()
+                      )}
+                    </div>
+                    {emp.name}
+                  </td>
                   <td className="p-4 text-blue-600 font-medium">{getDeptName(emp.departmentId || emp.department)}</td>
+                  <td className="p-4 text-slate-600">{emp.shiftId ? shifts.find(s => s.id === emp.shiftId)?.name || 'Unknown' : 'None'}</td>
                   <td className="p-4">
                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                         emp.status === 'Active' ? 'bg-green-100 text-green-700' :
@@ -1220,8 +1379,10 @@ function SettingsView({ appUsers, showNotification, currentUid }) {
 // ==========================================
 // 6. EMPLOYEE PROFILE VIEW
 // ==========================================
-function EmployeeProfileView({ employeeId, employees, attendances, appUsers, onBack }) {
+function EmployeeProfileView({ employeeId, employees, attendances, appUsers, shifts, onBack, showNotification }) {
   const employee = employees.find(e => e.empId === employeeId);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = React.useRef(null);
   
   if (!employee) {
     return (
@@ -1250,6 +1411,41 @@ function EmployeeProfileView({ employeeId, employees, attendances, appUsers, onB
   // Sort attendances by date descending
   const sortedAttendances = [...currentMonthAttendances].sort((a, b) => b.date.localeCompare(a.date));
 
+  const handlePhotoUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type and size (e.g., max 2MB)
+    if (!file.type.startsWith('image/')) {
+      showNotification('Please select an image file.', 'error');
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      showNotification('Image size should be less than 2MB.', 'error');
+      return;
+    }
+
+    try {
+      setIsUploading(true);
+      const storageRef = ref(storage, `profiles/${employee.id}_${Date.now()}_${file.name}`);
+      await uploadBytes(storageRef, file);
+      const photoUrl = await getDownloadURL(storageRef);
+      
+      await updateDoc(doc(db, 'employees', employee.id), {
+        photoUrl
+      });
+      showNotification('Profile photo updated successfully!', 'success');
+    } catch (error) {
+      console.error('Error uploading photo:', error);
+      showNotification('Failed to upload photo.', 'error');
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
   return (
     <div className="animate-fadeIn pb-12 max-w-5xl mx-auto">
       <header className="mb-6 flex justify-between items-center flex-wrap gap-4">
@@ -1264,8 +1460,29 @@ function EmployeeProfileView({ employeeId, employees, attendances, appUsers, onB
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
         <div className="p-6 border-b border-slate-200 bg-slate-50 flex items-start justify-between">
           <div className="flex items-center gap-4">
-            <div className="w-16 h-16 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-2xl font-bold shadow-inner">
-              {employee.name.charAt(0).toUpperCase()}
+            <div className="relative group">
+              <div className="w-16 h-16 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-2xl font-bold shadow-inner overflow-hidden">
+                {employee.photoUrl ? (
+                  <img src={employee.photoUrl} alt={employee.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                ) : (
+                  employee.name.charAt(0).toUpperCase()
+                )}
+              </div>
+              <button 
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading}
+                className="absolute inset-0 bg-black bg-opacity-50 text-white flex items-center justify-center rounded-full opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50"
+                title="Upload Photo"
+              >
+                {isUploading ? <span className="animate-spin text-xs">...</span> : <UploadCloud size={16} />}
+              </button>
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handlePhotoUpload} 
+                accept="image/*" 
+                className="hidden" 
+              />
             </div>
             <div>
               <h2 className="text-2xl font-bold text-slate-800">{employee.name}</h2>
@@ -1287,6 +1504,10 @@ function EmployeeProfileView({ employeeId, employees, attendances, appUsers, onB
               <div className="flex justify-between border-b border-slate-100 pb-2">
                 <span className="text-slate-500">Department</span>
                 <span className="font-medium text-slate-800">{getDeptName(employee.departmentId || employee.department)}</span>
+              </div>
+              <div className="flex justify-between border-b border-slate-100 pb-2">
+                <span className="text-slate-500">Shift</span>
+                <span className="font-medium text-slate-800">{employee.shiftId ? shifts.find(s => s.id === employee.shiftId)?.name || 'Unknown' : 'None'}</span>
               </div>
               <div className="flex justify-between border-b border-slate-100 pb-2">
                 <span className="text-slate-500">System Role</span>
@@ -1368,6 +1589,116 @@ function EmployeeProfileView({ employeeId, employees, attendances, appUsers, onB
             </tbody>
           </table>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// 7. SHIFTS VIEW
+// ==========================================
+function ShiftsView({ shifts, showNotification }) {
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [form, setForm] = useState({ name: '', startTime: '', endTime: '', description: '' });
+
+  const openForm = (shift = null) => {
+    if (shift) {
+      setEditingId(shift.id);
+      setForm({ name: shift.name, startTime: shift.startTime, endTime: shift.endTime, description: shift.description || '' });
+    } else {
+      setEditingId(null);
+      setForm({ name: '', startTime: '', endTime: '', description: '' });
+    }
+    setIsFormOpen(true);
+  };
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    try {
+      if (editingId) {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'shifts', editingId), form);
+      } else {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'shifts'), form);
+      }
+      setIsFormOpen(false);
+      showNotification("Shift saved successfully.");
+    } catch (error) {
+      showNotification("Error: " + error.message, 'error');
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this shift?")) return;
+    try {
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'shifts', id));
+      showNotification("Shift deleted successfully.");
+    } catch (error) {
+      showNotification("Error: " + error.message, 'error');
+    }
+  };
+
+  return (
+    <div className="animate-fadeIn pb-12 max-w-5xl mx-auto">
+      <header className="mb-6 flex justify-between items-center flex-wrap gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-800">Shift Management</h2>
+          <p className="text-slate-500">Define working shifts to assign to employees.</p>
+        </div>
+        <button onClick={() => openForm()} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm transition-colors">
+          <Plus size={18} /> Add Shift
+        </button>
+      </header>
+
+      {isFormOpen && (
+        <div className="mb-6 bg-white p-6 rounded-xl border border-blue-200 shadow-sm animate-fadeIn">
+          <form onSubmit={handleSave} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Shift Name</label>
+              <input required value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="e.g., Morning Shift" className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Description</label>
+              <input value={form.description} onChange={e => setForm({...form, description: e.target.value})} placeholder="Optional description" className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Start Time</label>
+              <input type="time" required value={form.startTime} onChange={e => setForm({...form, startTime: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">End Time</label>
+              <input type="time" required value={form.endTime} onChange={e => setForm({...form, endTime: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500" />
+            </div>
+            <div className="md:col-span-2 flex items-end gap-2 mt-2">
+              <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded font-medium hover:bg-blue-700 transition-colors">Save</button>
+              <button type="button" onClick={() => setIsFormOpen(false)} className="px-4 py-2 text-slate-600 border rounded font-medium hover:bg-slate-50 transition-colors">Cancel</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {shifts.map(shift => (
+          <div key={shift.id} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex justify-between items-start mb-3">
+              <h3 className="font-bold text-slate-800 text-lg">{shift.name}</h3>
+              <div className="flex gap-2">
+                <button onClick={() => openForm(shift)} className="text-blue-500 hover:text-blue-700 transition-colors"><Edit size={16}/></button>
+                <button onClick={() => handleDelete(shift.id)} className="text-red-500 hover:text-red-700 transition-colors"><Trash2 size={16}/></button>
+              </div>
+            </div>
+            {shift.description && <p className="text-sm text-slate-500 mb-4">{shift.description}</p>}
+            <div className="flex items-center gap-2 text-sm font-medium text-slate-700 bg-slate-50 p-2 rounded-lg border border-slate-100">
+              <Clock size={16} className="text-blue-500" />
+              {shift.startTime} - {shift.endTime}
+            </div>
+          </div>
+        ))}
+        {shifts.length === 0 && (
+          <div className="col-span-full text-center py-12 text-slate-400 bg-white rounded-xl border border-slate-200 border-dashed">
+            No shifts defined yet. Click "Add Shift" to create one.
+          </div>
+        )}
       </div>
     </div>
   );
