@@ -22,6 +22,7 @@ import {
   PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer, 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend 
 } from 'recharts';
+import { Analytics } from '@vercel/analytics/react';
 
 // --- Firebase Initialization ---
 const firebaseConfig = {
@@ -367,6 +368,7 @@ export default function App() {
           )}
         </div>
       </main>
+      <Analytics />
     </div>
   );
 }
