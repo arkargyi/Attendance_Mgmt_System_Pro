@@ -3,9 +3,10 @@ import {
   Users, CalendarCheck, BarChart3, History, Settings, LogOut, 
   UploadCloud, Download, Trash2, Edit, AlertTriangle, CheckSquare, 
   Square, Search, Plus, ChevronUp, ChevronDown, ShieldAlert, Key,
-  Filter, X, Clock
+  Filter, X, Clock, Sparkles
 } from 'lucide-react';
 import Fuse from 'fuse.js';
+import { GoogleGenAI } from '@google/genai';
 import { initializeApp } from 'firebase/app';
 import { 
   getAuth, onAuthStateChanged, signOut,
@@ -184,7 +185,11 @@ export default function App() {
         showNotification("Logged in successfully!");
       }
     } catch (error) {
-      showNotification(error.message, 'error');
+      if (error.code === 'auth/email-already-in-use') {
+        showNotification("This email is already registered. Please switch to Log In.", 'error');
+      } else {
+        showNotification(error.message, 'error');
+      }
     }
   };
 
@@ -1018,6 +1023,8 @@ function EmployeeManagementView({ employees, shifts, showNotification, onEmploye
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState({ empId: '', name: '', departmentId: MASTER_DEPARTMENTS[0].id, status: 'Active', resignDate: '', shiftId: '' });
+  const [aiInsight, setAiInsight] = useState('');
+  const [isGeneratingInsight, setIsGeneratingInsight] = useState(false);
 
   const [sortConfig, setSortConfig] = useState({ key: 'empId', direction: 'asc' });
 
@@ -1033,12 +1040,12 @@ function EmployeeManagementView({ employees, shifts, showNotification, onEmploye
     if (searchTerm) {
       const fuse = new Fuse(employees, {
         keys: [
-          'name',
-          'empId',
-          { name: 'departmentId', getFn: (emp: any) => getDeptName(emp.departmentId || emp.department) }
+          { name: 'name', weight: 0.5 },
+          { name: 'empId', weight: 0.3 },
+          { name: 'departmentId', getFn: (emp: any) => getDeptName(emp.departmentId || emp.department), weight: 0.2 }
         ],
-        threshold: 0.3, // Lower threshold means more exact matching
-        distance: 100,
+        threshold: 0.4, // Increased threshold for better fuzzy matching
+        ignoreLocation: true,
         includeScore: true
       });
       filtered = fuse.search(searchTerm).map(result => result.item);
@@ -1059,6 +1066,28 @@ function EmployeeManagementView({ employees, shifts, showNotification, onEmploye
     }
     return filtered;
   }, [employees, searchTerm, sortConfig]);
+
+  const generateAIInsight = async () => {
+    if (sortedAndFilteredEmployees.length === 0) {
+      showNotification("No employees to analyze.", "error");
+      return;
+    }
+    setIsGeneratingInsight(true);
+    setAiInsight('');
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const prompt = `Analyze this list of employees and provide a short, insightful summary (max 3 sentences). Highlight any interesting distributions of departments, shifts, or statuses. Data: ${JSON.stringify(sortedAndFilteredEmployees.map(e => ({ name: e.name, dept: getDeptName(e.departmentId || e.department), status: e.status, shift: shifts.find(s => s.id === e.shiftId)?.name || 'None' })))}`;
+      
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+      });
+      setAiInsight(response.text);
+    } catch (error) {
+      showNotification("Failed to generate AI insight: " + error.message, "error");
+    }
+    setIsGeneratingInsight(false);
+  };
 
   const openForm = (emp = null) => {
     if (emp) {
@@ -1104,6 +1133,33 @@ function EmployeeManagementView({ employees, shifts, showNotification, onEmploye
       result.push(obj);
     }
     return result;
+  };
+
+  const exportToCSV = () => {
+    const headers = ['Emp_ID', 'Name', 'Department', 'Status', 'ResignDate', 'Shift_ID'];
+    const csvRows = [headers.join(',')];
+    
+    sortedAndFilteredEmployees.forEach(emp => {
+      const row = [
+        emp.empId || '',
+        `"${emp.name || ''}"`,
+        `"${getDeptName(emp.departmentId || emp.department)}"`,
+        emp.status || '',
+        emp.resignDate || '',
+        emp.shiftId || ''
+      ];
+      csvRows.push(row.join(','));
+    });
+    
+    const csvData = csvRows.join('\n');
+    const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `employees_export_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const handleFileUpload = (e) => {
@@ -1170,6 +1226,9 @@ function EmployeeManagementView({ employees, shifts, showNotification, onEmploye
           <p className="text-slate-500">Employee များသည် Department (Master Data) နှင့် တိုက်ရိုက်ချိတ်ဆက်ထားပါသည်။</p>
         </div>
         <div className="flex gap-2">
+          <button onClick={exportToCSV} className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm transition-colors">
+            <Download size={18} /> Export
+          </button>
           <label className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg flex items-center gap-2 cursor-pointer shadow-sm transition-colors">
             <UploadCloud size={18} /> Upload CSV
             <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
@@ -1211,7 +1270,7 @@ function EmployeeManagementView({ employees, shifts, showNotification, onEmploye
       )}
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200">
-        <div className="p-4 border-b border-slate-200 bg-slate-50">
+        <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-col md:flex-row gap-4 justify-between items-center">
           <div className="relative max-w-sm w-full">
             <Search className="absolute left-3 top-2.5 text-slate-400" size={18} />
             <input 
@@ -1220,7 +1279,31 @@ function EmployeeManagementView({ employees, shifts, showNotification, onEmploye
               className="pl-10 pr-4 py-2 w-full border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
             />
           </div>
+          <button 
+            onClick={generateAIInsight} 
+            disabled={isGeneratingInsight}
+            className="flex items-center gap-2 px-4 py-2 bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 rounded-lg font-medium transition-colors disabled:opacity-50"
+          >
+            <Sparkles size={18} className={isGeneratingInsight ? "animate-pulse" : ""} />
+            {isGeneratingInsight ? "Analyzing..." : "AI Insights"}
+          </button>
         </div>
+
+        {aiInsight && (
+          <div className="p-4 bg-purple-50 border-b border-purple-100 flex gap-3 items-start animate-fadeIn">
+            <div className="p-2 bg-purple-200 text-purple-700 rounded-full flex-shrink-0">
+              <Sparkles size={16} />
+            </div>
+            <div className="flex-1">
+              <h4 className="text-sm font-bold text-purple-900 mb-1">Gemini Insight</h4>
+              <p className="text-sm text-purple-800 leading-relaxed">{aiInsight}</p>
+            </div>
+            <button onClick={() => setAiInsight('')} className="text-purple-400 hover:text-purple-600">
+              <X size={16} />
+            </button>
+          </div>
+        )}
+
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm whitespace-nowrap">
             <thead className="bg-slate-50 text-slate-600 border-b">
@@ -1276,14 +1359,24 @@ function EmployeeManagementView({ employees, shifts, showNotification, onEmploye
 // 5. SETTINGS VIEW (User Role Management - Super Admin Only)
 // ==========================================
 function SettingsView({ appUsers, showNotification, currentUid }) {
+  const [confirmAction, setConfirmAction] = useState(null);
   
   const handleRoleChange = async (userId, newRole) => {
     // Prevent accidental self-demotion
     if (userId === currentUid && newRole !== 'Super Admin') {
-      const confirmDemote = window.confirm("Are you sure you want to demote yourself? You will lose Super Admin access.");
-      if (!confirmDemote) return;
+      setConfirmAction({
+        title: "Demote Yourself?",
+        message: "Are you sure you want to demote yourself? You will lose Super Admin access.",
+        onConfirm: async () => {
+          await updateRole(userId, newRole);
+        }
+      });
+      return;
     }
+    await updateRole(userId, newRole);
+  };
 
+  const updateRole = async (userId, newRole) => {
     try {
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'app_users', userId), {
         role: newRole
@@ -1294,8 +1387,46 @@ function SettingsView({ appUsers, showNotification, currentUid }) {
     }
   };
 
+  const handleDeleteUser = (userId) => {
+    if (userId === currentUid) {
+      showNotification("You cannot delete your own account.", 'error');
+      return;
+    }
+    setConfirmAction({
+      title: "Delete User?",
+      message: "Are you sure you want to delete this user? This will remove their system access.",
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'app_users', userId));
+          showNotification("User deleted successfully.");
+        } catch (error) {
+          showNotification("Error deleting user: " + error.message, 'error');
+        }
+      }
+    });
+  };
+
+  const executeConfirmAction = async () => {
+    if (!confirmAction) return;
+    await confirmAction.onConfirm();
+    setConfirmAction(null);
+  };
+
   return (
     <div className="animate-fadeIn max-w-5xl mx-auto">
+      {confirmAction && (
+        <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 animate-slideDown">
+            <h3 className="text-xl font-bold text-slate-800 mb-2">{confirmAction.title}</h3>
+            <p className="text-slate-600 mb-6">{confirmAction.message}</p>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setConfirmAction(null)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">Cancel</button>
+              <button onClick={executeConfirmAction} className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors">Confirm</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <header className="mb-6 flex items-center gap-3">
         <div className="p-3 bg-purple-100 text-purple-600 rounded-lg">
           <Key size={24} />
@@ -1322,6 +1453,7 @@ function SettingsView({ appUsers, showNotification, currentUid }) {
                 <th className="p-4 font-medium">Joined Date</th>
                 <th className="p-4 font-medium">Current Role</th>
                 <th className="p-4 font-medium text-right">Assign Role</th>
+                <th className="p-4 font-medium text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -1353,10 +1485,17 @@ function SettingsView({ appUsers, showNotification, currentUid }) {
                       ))}
                     </select>
                   </td>
+                  <td className="p-4 text-right">
+                    {appUser.id !== currentUid && (
+                      <button onClick={() => handleDeleteUser(appUser.id)} className="text-red-500 hover:text-red-700 transition-colors" title="Delete User">
+                        <Trash2 size={16} />
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
               {appUsers.length === 0 && (
-                <tr><td colSpan="4" className="p-8 text-center text-slate-400">No users found.</td></tr>
+                <tr><td colSpan="5" className="p-8 text-center text-slate-400">No users found.</td></tr>
               )}
             </tbody>
           </table>
