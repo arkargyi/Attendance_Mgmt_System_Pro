@@ -324,7 +324,7 @@ export default function App() {
       {/* Sidebar */}
       <aside className="w-full md:w-64 bg-slate-900 text-white flex flex-col">
         <div className="p-6 border-b border-slate-800">
-          <h1 className="text-2xl font-bold flex items-center gap-2 text-blue-400"><CalendarCheck /> AttenPro</h1>
+          <h1 className="text-2xl font-bold flex items-center gap-2 text-blue-400"><CalendarCheck /> AttenPro(တက်/ပျက်)</h1>
           <p className="text-xs text-slate-400 mt-1">ERP Module - v2.0</p>
         </div>
         <nav className="flex-1 px-4 py-6 space-y-2">
@@ -338,7 +338,7 @@ export default function App() {
             <>
               <SidebarItem icon={<History />} label="Records History" active={currentView === 'history'} onClick={() => setCurrentView('history')} />
               <SidebarItem icon={<FileText />} label="Reports" active={currentView === 'reports'} onClick={() => setCurrentView('reports')} />
-              <SidebarItem icon={<Users />} label="Employee Mgt" active={currentView === 'employees'} onClick={() => setCurrentView('employees')} />
+              <SidebarItem icon={<Users />} label="Employee List" active={currentView === 'employees'} onClick={() => setCurrentView('employees')} />
               <SidebarItem icon={<Clock />} label="Shifts" active={currentView === 'shifts'} onClick={() => setCurrentView('shifts')} />
             </>
           )}
@@ -1324,7 +1324,7 @@ function EmployeeManagementView({ employees, shifts, showNotification, onEmploye
     setAiInsight('');
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const prompt = `Analyze this list of employees and provide a short, insightful summary (max 3 sentences). Highlight any interesting distributions of departments, shifts, or statuses. Data: ${JSON.stringify(sortedAndFilteredEmployees.map(e => ({ name: e.name, dept: getDeptName(e.departmentId || e.department), status: e.status, shift: shifts.find(s => s.id === e.shiftId)?.name || 'None' })))}`;
+      const prompt = `Analyze this list of employees and provide a short, insightful summary (max 4 sentences) .Language must use in burmese . Highlight any interesting distributions of departments, shifts, or statuses.You can give advise what should to do. Data: ${JSON.stringify(sortedAndFilteredEmployees.map(e => ({ name: e.name, dept: getDeptName(e.departmentId || e.department), status: e.status, shift: shifts.find(s => s.id === e.shiftId)?.name || 'None' })))}`;
       
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
