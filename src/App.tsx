@@ -3,7 +3,7 @@ import {
   Users, CalendarCheck, BarChart3, History, Settings, LogOut, 
   UploadCloud, Download, Trash2, Edit, AlertTriangle, CheckSquare, 
   Square, Search, Plus, ChevronUp, ChevronDown, ShieldAlert, Key,
-  Filter, X, Clock, Sparkles
+  Filter, X, Clock, Sparkles, FileText, LineChart, Calendar
 } from 'lucide-react';
 import Fuse from 'fuse.js';
 import { GoogleGenAI } from '@google/genai';
@@ -15,7 +15,8 @@ import {
   sendPasswordResetEmail
 } from 'firebase/auth';
 import { 
-  getFirestore, collection, onSnapshot, addDoc, updateDoc, 
+  initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
+  collection, onSnapshot, addDoc, updateDoc, 
   deleteDoc, doc, writeBatch, setDoc, getDocs
 } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -23,6 +24,7 @@ import {
   PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer, 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend 
 } from 'recharts';
+import { motion, AnimatePresence } from 'motion/react';
 
 // --- Firebase Initialization ---
 const firebaseConfig = {
@@ -36,7 +38,9 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
-const db = getFirestore(app);
+const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({tabManager: persistentMultipleTabManager()})
+});
 const storage = getStorage(app);
 const appId = 'attendance-pro-production';
 
@@ -49,7 +53,7 @@ const MASTER_DEPARTMENTS = [
   { id: "dept_ms", name: "Machine shop" }, { id: "dept_mill", name: "Mill" }, { id: "dept_evap", name: "Evaporator" },
   { id: "dept_elec", name: "Electrical" }, { id: "dept_pan", name: "Pan" }, { id: "dept_gv", name: "General(Vehicle)" },
   { id: "dept_gen", name: "General" }, { id: "dept_lab", name: "Laboratory" }, { id: "dept_me", name: "Manager of Engineering" },
-  { id: "dept_mis", name: "MIS" }, { id: "dept_pp", name: "Power Plant" }, { id: "dept_prod", name: "Production" },
+  { id: "dept_mis", name: "MIS" }, { id: "dept_pp", name: "Power Plant" }, { id: "dept_prod", name: "Production Office" },
   { id: "dept_off", name: "Office" }, { id: "dept_store", name: "Store" }, { id: "dept_cpny", name: "CPNY" }, { id: "dept_safety", name: "Safety" }
 ];
 
@@ -67,6 +71,14 @@ const ATTENDANCE_TYPES = ["Present", "Leave", "Absent", "Late", "Half-Day"];
 const EMPLOYEE_STATUSES = ["Active", "Inactive", "Resigned"];
 const USER_ROLES = ["Super Admin", "Admin", "Normal"];
 
+const getMyanmarDateString = () => {
+  const date = new Date(new Date().toLocaleString("en-US", {timeZone: "Asia/Yangon"}));
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [currentUserRole, setCurrentUserRole] = useState(null);
@@ -78,6 +90,7 @@ export default function App() {
   const [attendances, setAttendances] = useState([]);
   const [appUsers, setAppUsers] = useState([]);
   const [shifts, setShifts] = useState([]);
+  const [leaveRequests, setLeaveRequests] = useState([]);
   
   const [loading, setLoading] = useState(true);
   const [notification, setNotification] = useState(null);
@@ -117,6 +130,7 @@ export default function App() {
     const attRef = collection(db, 'artifacts', appId, 'public', 'data', 'attendances');
     const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'app_users'); // Global users list
     const shiftsRef = collection(db, 'artifacts', appId, 'public', 'data', 'shifts');
+    const leaveRequestsRef = collection(db, 'artifacts', appId, 'public', 'data', 'leave_requests');
 
     const handleFirebaseError = (error) => {
       if (error.code === 'permission-denied') {
@@ -158,7 +172,11 @@ export default function App() {
       setShifts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     }, handleFirebaseError);
 
-    return () => { unsubEmp(); unsubAtt(); unsubUsers(); unsubShifts(); };
+    const unsubLeaveReqs = onSnapshot(leaveRequestsRef, (snapshot) => {
+      setLeaveRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, handleFirebaseError);
+
+    return () => { unsubEmp(); unsubAtt(); unsubUsers(); unsubShifts(); unsubLeaveReqs(); };
   }, [user]);
 
   const handleEmailAuth = async (e) => {
@@ -224,13 +242,25 @@ export default function App() {
   if (!user) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-        {notification && (
-          <div className={`absolute top-4 right-4 z-50 px-4 py-3 rounded-md shadow-lg flex items-center gap-2 max-w-md ${notification.type === 'error' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>
-            <AlertTriangle size={20} className="flex-shrink-0" />
-            <span className="font-medium text-sm leading-snug">{notification.message}</span>
-          </div>
-        )}
-        <div className="bg-white p-8 rounded-xl shadow-lg max-w-md w-full">
+        <AnimatePresence>
+          {notification && (
+            <motion.div 
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className={`absolute top-4 right-4 z-50 px-4 py-3 rounded-md shadow-lg flex items-center gap-2 max-w-md ${notification.type === 'error' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}
+            >
+              <AlertTriangle size={20} className="flex-shrink-0" />
+              <span className="font-medium text-sm leading-snug">{notification.message}</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.3 }}
+          className="bg-white p-8 rounded-xl shadow-lg max-w-md w-full"
+        >
           <div className="flex justify-center mb-6">
             <div className="p-4 bg-blue-100 rounded-full text-blue-700">
               <ShieldAlert size={48} />
@@ -275,7 +305,7 @@ export default function App() {
               {authMode === 'login' ? 'Switch to Sign Up' : 'Switch to Log In'}
             </button>
           </p>
-        </div>
+        </motion.div>
       </div>
     );
   }
@@ -301,11 +331,13 @@ export default function App() {
           {/* Normal, Admin, Super Admin */}
           <SidebarItem icon={<BarChart3 />} label="Dashboard" active={currentView === 'dashboard'} onClick={() => setCurrentView('dashboard')} />
           <SidebarItem icon={<CheckSquare />} label="Submit form" active={currentView === 'submit'} onClick={() => setCurrentView('submit')} />
+          <SidebarItem icon={<Calendar />} label="Leave Requests" active={currentView === 'leaveRequests'} onClick={() => setCurrentView('leaveRequests')} />
           
           {/* Admin, Super Admin */}
           {['Admin', 'Super Admin'].includes(currentUserRole) && (
             <>
               <SidebarItem icon={<History />} label="Records History" active={currentView === 'history'} onClick={() => setCurrentView('history')} />
+              <SidebarItem icon={<FileText />} label="Reports" active={currentView === 'reports'} onClick={() => setCurrentView('reports')} />
               <SidebarItem icon={<Users />} label="Employee Mgt" active={currentView === 'employees'} onClick={() => setCurrentView('employees')} />
               <SidebarItem icon={<Clock />} label="Shifts" active={currentView === 'shifts'} onClick={() => setCurrentView('shifts')} />
             </>
@@ -343,33 +375,57 @@ export default function App() {
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col h-screen overflow-hidden relative">
-        {notification && (
-          <div className={`absolute top-4 right-4 z-50 px-4 py-3 rounded-md shadow-lg flex items-center gap-2 max-w-md ${notification.type === 'error' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>
-            <AlertTriangle size={20} className="flex-shrink-0" />
-            <span className="font-medium text-sm">{notification.message}</span>
-          </div>
-        )}
-        <div className="flex-1 overflow-auto p-4 md:p-8">
-          {loading ? (
-            <div className="flex flex-col items-center justify-center h-full text-slate-500">
-              <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mb-4"></div>
-              <p>Connecting ERP Database...</p>
-            </div>
-          ) : (
-            <>
-              {currentView === 'dashboard' && <DashboardView employees={employees} attendances={attendances} />}
-              {currentView === 'submit' && <SubmitAttendanceView employees={employees} attendances={attendances} showNotification={showNotification} />}
-              
-              {/* Protected Routes Handling */}
-              {['Admin', 'Super Admin'].includes(currentUserRole) && currentView === 'history' && <HistoryView attendances={attendances} employees={employees} showNotification={showNotification} onEmployeeClick={(id) => { setPreviousView(currentView); setSelectedEmployeeId(id); setCurrentView('employeeProfile'); }} />}
-              {['Admin', 'Super Admin'].includes(currentUserRole) && currentView === 'employees' && <EmployeeManagementView employees={employees} shifts={shifts} showNotification={showNotification} onEmployeeClick={(id) => { setPreviousView(currentView); setSelectedEmployeeId(id); setCurrentView('employeeProfile'); }} />}
-              {['Admin', 'Super Admin'].includes(currentUserRole) && currentView === 'shifts' && <ShiftsView shifts={shifts} showNotification={showNotification} />}
-              
-              {currentUserRole === 'Super Admin' && currentView === 'settings' && <SettingsView appUsers={appUsers} showNotification={showNotification} currentUid={user.uid} />}
-              
-              {currentView === 'employeeProfile' && <EmployeeProfileView employeeId={selectedEmployeeId} employees={employees} attendances={attendances} appUsers={appUsers} shifts={shifts} onBack={() => setCurrentView(previousView)} showNotification={showNotification} />}
-            </>
+        <AnimatePresence>
+          {notification && (
+            <motion.div 
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className={`absolute top-4 right-4 z-50 px-4 py-3 rounded-md shadow-lg flex items-center gap-2 max-w-md ${notification.type === 'error' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}
+            >
+              <AlertTriangle size={20} className="flex-shrink-0" />
+              <span className="font-medium text-sm">{notification.message}</span>
+            </motion.div>
           )}
+        </AnimatePresence>
+        <div className="flex-1 overflow-auto p-4 md:p-8">
+          <AnimatePresence mode="wait">
+            {loading ? (
+              <motion.div 
+                key="loading"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="flex flex-col items-center justify-center h-full text-slate-500"
+              >
+                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mb-4"></div>
+                <p>Connecting ERP Database...</p>
+              </motion.div>
+            ) : (
+              <motion.div 
+                key={currentView}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.2 }}
+                className="h-full"
+              >
+                {currentView === 'dashboard' && <DashboardView employees={employees} attendances={attendances} />}
+                {currentView === 'submit' && <SubmitAttendanceView employees={employees} attendances={attendances} showNotification={showNotification} />}
+                {currentView === 'leaveRequests' && <LeaveRequestsView leaveRequests={leaveRequests} employees={employees} currentUserRole={currentUserRole} user={user} showNotification={showNotification} />}
+                
+                {/* Protected Routes Handling */}
+                {['Admin', 'Super Admin'].includes(currentUserRole) && currentView === 'history' && <HistoryView attendances={attendances} employees={employees} showNotification={showNotification} onEmployeeClick={(id) => { setPreviousView(currentView); setSelectedEmployeeId(id); setCurrentView('employeeProfile'); }} />}
+                {['Admin', 'Super Admin'].includes(currentUserRole) && currentView === 'reports' && <ReportsView attendances={attendances} employees={employees} showNotification={showNotification} />}
+                {['Admin', 'Super Admin'].includes(currentUserRole) && currentView === 'employees' && <EmployeeManagementView employees={employees} shifts={shifts} showNotification={showNotification} onEmployeeClick={(id) => { setPreviousView(currentView); setSelectedEmployeeId(id); setCurrentView('employeeProfile'); }} />}
+                {['Admin', 'Super Admin'].includes(currentUserRole) && currentView === 'shifts' && <ShiftsView shifts={shifts} showNotification={showNotification} />}
+                
+                {currentUserRole === 'Super Admin' && currentView === 'settings' && <SettingsView appUsers={appUsers} showNotification={showNotification} currentUid={user.uid} />}
+                
+                {currentView === 'employeeProfile' && <EmployeeProfileView employeeId={selectedEmployeeId} employees={employees} attendances={attendances} appUsers={appUsers} shifts={shifts} onBack={() => setCurrentView(previousView)} showNotification={showNotification} />}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </main>
     </div>
@@ -387,7 +443,7 @@ const SidebarItem = ({ icon, label, active, onClick }) => (
 // 1. DASHBOARD VIEW
 // ==========================================
 function DashboardView({ employees, attendances }) {
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(getMyanmarDateString());
   const [detailStatus, setDetailStatus] = useState(null);
 
   const todaysRecords = useMemo(() => {
@@ -567,7 +623,7 @@ function DashboardView({ employees, attendances }) {
           <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2"><BarChart3 size={18}/> Today's Attendance</h3>
           <div className="h-64">
             {pieData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                 <PieChart>
                   <Pie
                     data={pieData}
@@ -595,7 +651,7 @@ function DashboardView({ employees, attendances }) {
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
           <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2"><BarChart3 size={18}/> Last 7 Days Trend</h3>
           <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
               <BarChart data={last7DaysData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                 <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} />
@@ -625,12 +681,13 @@ function DashboardView({ employees, attendances }) {
   );
 }
 
-const StatCard = ({ title, value, color, onClick, isActive }) => (
+const StatCard = ({ title, value, color, onClick, isActive }: { title: string, value: any, color: string, onClick?: () => void, isActive?: boolean }) => (
   <button 
     onClick={onClick}
+    disabled={!onClick}
     className={`bg-white p-6 rounded-xl shadow-sm border transition-all duration-200 flex items-center w-full text-left outline-none ${
       isActive ? 'border-slate-400 ring-2 ring-slate-100 shadow-md transform scale-[1.02]' : 'border-slate-200 hover:border-slate-300 hover:shadow-md'
-    }`}
+    } ${!onClick ? 'cursor-default hover:border-slate-200 hover:shadow-sm' : ''}`}
   >
     <div className={`w-3 h-12 rounded-full ${color} mr-4`}></div>
     <div>
@@ -645,7 +702,7 @@ const StatCard = ({ title, value, color, onClick, isActive }) => (
 // 2. SUBMIT ATTENDANCE VIEW
 // ==========================================
 function SubmitAttendanceView({ employees, attendances, showNotification }) {
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(getMyanmarDateString());
   const [departmentId, setDepartmentId] = useState('');
   const [status, setStatus] = useState('Present');
   const [selectedEmpIds, setSelectedEmpIds] = useState([]);
@@ -713,10 +770,19 @@ function SubmitAttendanceView({ employees, attendances, showNotification }) {
       });
 
       await batch.commit();
-      showNotification(`အောင်မြင်ပါသည်။ ဝန်ထမ်း (${validEmpIds.length}) ဦးအတွက် Attendance တင်ပြီးပါပြီ။`);
+      if (!navigator.onLine) {
+        showNotification(`Offline Mode: ဝန်ထမ်း (${validEmpIds.length}) ဦးအတွက် Attendance ကို Local တွင် သိမ်းဆည်းထားပါသည်။ အင်တာနက်ရရှိချိန်တွင် အလိုအလျောက် Sync လုပ်ပါမည်။`);
+      } else {
+        showNotification(`အောင်မြင်ပါသည်။ ဝန်ထမ်း (${validEmpIds.length}) ဦးအတွက် Attendance တင်ပြီးပါပြီ။`);
+      }
       setSelectedEmpIds([]);
     } catch (error) {
-      showNotification("Error: " + error.message, 'error');
+      if (error.code === 'unavailable') {
+        showNotification(`Offline Mode: ဝန်ထမ်း (${validEmpIds.length}) ဦးအတွက် Attendance ကို Local တွင် သိမ်းဆည်းထားပါသည်။ အင်တာနက်ရရှိချိန်တွင် အလိုအလျောက် Sync လုပ်ပါမည်။`);
+        setSelectedEmpIds([]);
+      } else {
+        showNotification("Error: " + error.message, 'error');
+      }
     }
     setIsSubmitting(false);
   };
@@ -772,9 +838,20 @@ function SubmitAttendanceView({ employees, attendances, showNotification }) {
                 ))}
               </div>
               <div className="mt-8 pt-4 border-t flex justify-end">
-                <button onClick={handleSubmit} disabled={isSubmitting || selectedEmpIds.length === 0} className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white px-8 py-3 rounded-lg font-medium shadow-sm transition-colors">
-                  {isSubmitting ? 'Submitting...' : 'Submit Attendance'}
-                </button>
+                <motion.button 
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={handleSubmit} 
+                  disabled={isSubmitting || selectedEmpIds.length === 0} 
+                  className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white px-8 py-3 rounded-lg font-medium shadow-sm transition-colors flex items-center gap-2"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      Submitting...
+                    </>
+                  ) : 'Submit Attendance'}
+                </motion.button>
               </div>
             </div>
           )}
@@ -789,7 +866,7 @@ function SubmitAttendanceView({ employees, attendances, showNotification }) {
 // 3. HISTORY VIEW
 // ==========================================
 function HistoryView({ attendances, employees, showNotification, onEmployeeClick }) {
-  const today = new Date().toISOString().split('T')[0];
+  const today = getMyanmarDateString();
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
   const [filterDept, setFilterDept] = useState('');
@@ -976,7 +1053,6 @@ function HistoryView({ attendances, employees, showNotification, onEmployeeClick
                 <SortableHeader label="Date" sortKey="date" />
                 <SortableHeader label="Emp ID" sortKey="empId" />
                 <SortableHeader label="Name" sortKey="empName" />
-                <SortableHeader label="Department" sortKey="departmentId" />
                 <SortableHeader label="Status" sortKey="status" />
                 <th className="p-4 font-medium text-right">Actions</th>
               </tr>
@@ -988,17 +1064,21 @@ function HistoryView({ attendances, employees, showNotification, onEmployeeClick
                   <tr key={record.id} className="hover:bg-slate-50 transition-colors">
                     <td className="p-4">{record.date}</td>
                     <td className="p-4 font-medium text-blue-600 cursor-pointer hover:underline" onClick={() => onEmployeeClick && onEmployeeClick(record.empId)}>{record.empId}</td>
-                    <td className="p-4 cursor-pointer hover:text-blue-600 flex items-center gap-3" onClick={() => onEmployeeClick && onEmployeeClick(record.empId)}>
-                      <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-bold shadow-inner overflow-hidden flex-shrink-0">
-                        {emp?.photoUrl ? (
-                          <img src={emp.photoUrl} alt={record.empName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                        ) : (
-                          record.empName?.charAt(0).toUpperCase() || '?'
-                        )}
+                    <td className="p-4 cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => onEmployeeClick && onEmployeeClick(record.empId)}>
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-bold shadow-inner overflow-hidden flex-shrink-0">
+                          {emp?.photoUrl ? (
+                            <img src={emp.photoUrl} alt={record.empName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          ) : (
+                            record.empName?.charAt(0).toUpperCase() || '?'
+                          )}
+                        </div>
+                        <div>
+                          <p className="font-medium text-slate-800 hover:text-blue-600 transition-colors">{record.empName}</p>
+                          <p className="text-xs text-slate-500">{getDeptName(record.departmentId || record.department)}</p>
+                        </div>
                       </div>
-                      {record.empName}
                     </td>
-                    <td className="p-4">{getDeptName(record.departmentId || record.department)}</td>
                     <td className="p-4"><span className="px-2 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700">{record.status}</span></td>
                     <td className="p-4 text-right">
                       <button onClick={() => handleDelete(record.id)} className="text-red-500 hover:text-red-700 transition-colors"><Trash2 size={16}/></button>
@@ -1016,7 +1096,175 @@ function HistoryView({ attendances, employees, showNotification, onEmployeeClick
 
 
 // ==========================================
-// 4. EMPLOYEE MANAGEMENT VIEW
+// 4. REPORTS VIEW
+// ==========================================
+function ReportsView({ attendances, employees, showNotification }) {
+  const today = getMyanmarDateString();
+  const [startDate, setStartDate] = useState(today);
+  const [endDate, setEndDate] = useState(today);
+  const [filterDept, setFilterDept] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+
+  const filteredRecords = useMemo(() => {
+    return attendances.filter(a => {
+      if (a.date < startDate || a.date > endDate) return false;
+      if (filterDept && a.departmentId !== filterDept && a.department !== filterDept) return false;
+      if (filterStatus && a.status !== filterStatus) return false;
+      return true;
+    });
+  }, [attendances, startDate, endDate, filterDept, filterStatus]);
+
+  const stats = useMemo(() => {
+    return {
+      total: filteredRecords.length,
+      present: filteredRecords.filter(a => a.status === 'Present').length,
+      leave: filteredRecords.filter(a => a.status === 'Leave').length,
+      absent: filteredRecords.filter(a => a.status === 'Absent').length,
+      late: filteredRecords.filter(a => a.status === 'Late').length,
+      halfDay: filteredRecords.filter(a => a.status === 'Half-Day').length,
+    };
+  }, [filteredRecords]);
+
+  const pieData = [
+    { name: 'Present', value: stats.present, color: '#10b981' },
+    { name: 'Leave', value: stats.leave, color: '#f59e0b' },
+    { name: 'Absent', value: stats.absent, color: '#ef4444' },
+    { name: 'Late', value: stats.late, color: '#f97316' },
+    { name: 'Half-Day', value: stats.halfDay, color: '#8b5cf6' },
+  ].filter(d => d.value > 0);
+
+  const trendData = useMemo(() => {
+    const dataMap = {};
+    filteredRecords.forEach(a => {
+      if (!dataMap[a.date]) {
+        dataMap[a.date] = { date: a.date, Present: 0, Absent: 0, Leave: 0, Late: 0, 'Half-Day': 0 };
+      }
+      dataMap[a.date][a.status] = (dataMap[a.date][a.status] || 0) + 1;
+    });
+    return Object.values(dataMap).sort((a: any, b: any) => a.date.localeCompare(b.date));
+  }, [filteredRecords]);
+
+  const exportReport = () => {
+    if (filteredRecords.length === 0) {
+      showNotification("No records to export.", "error");
+      return;
+    }
+    const csvRows = ['Date,Emp ID,Name,Department,Status'];
+    filteredRecords.forEach(r => {
+      csvRows.push(`${r.date},${r.empId},"${r.empName}","${getDeptName(r.departmentId || r.department)}",${r.status}`);
+    });
+    const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.setAttribute('download', `attendance_report_${startDate}_to_${endDate}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  return (
+    <div className="animate-fadeIn pb-12">
+      <header className="mb-6 flex justify-between items-center flex-wrap gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-800">Advanced Reports</h2>
+          <p className="text-slate-500">Generate custom reports and visualize attendance data.</p>
+        </div>
+        <button 
+          onClick={exportReport}
+          className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm"
+        >
+          <Download size={16} />
+          Export Report
+        </button>
+      </header>
+
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 mb-6 p-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Start Date</label>
+            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full border rounded-md p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">End Date</label>
+            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-full border rounded-md p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Department</label>
+            <select value={filterDept} onChange={(e) => setFilterDept(e.target.value)} className="w-full border rounded-md p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="">All Departments</option>
+              {MASTER_DEPARTMENTS.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Status</label>
+            <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="w-full border rounded-md p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="">All Statuses</option>
+              {ATTENDANCE_TYPES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
+        <StatCard title="Total Records" value={stats.total} color="bg-blue-50 text-blue-700" />
+        <StatCard title="Present" value={stats.present} color="bg-green-50 text-green-700" />
+        <StatCard title="Leave" value={stats.leave} color="bg-yellow-50 text-yellow-700" />
+        <StatCard title="Absent" value={stats.absent} color="bg-red-50 text-red-700" />
+        <StatCard title="Late" value={stats.late} color="bg-orange-50 text-orange-700" />
+        <StatCard title="Half-Day" value={stats.halfDay} color="bg-purple-50 text-purple-700" />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+          <h3 className="text-lg font-bold text-slate-800 mb-4">Attendance Trend</h3>
+          <div className="h-64">
+            {trendData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                <BarChart data={trendData}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                  <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b'}} />
+                  <YAxis axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b'}} />
+                  <RechartsTooltip cursor={{fill: '#f1f5f9'}} contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} />
+                  <Legend wrapperStyle={{fontSize: '12px'}} />
+                  <Bar dataKey="Present" stackId="a" fill="#10b981" radius={[0, 0, 4, 4]} />
+                  <Bar dataKey="Late" stackId="a" fill="#f97316" />
+                  <Bar dataKey="Half-Day" stackId="a" fill="#8b5cf6" />
+                  <Bar dataKey="Leave" stackId="a" fill="#f59e0b" />
+                  <Bar dataKey="Absent" stackId="a" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-slate-400">No data available</div>
+            )}
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+          <h3 className="text-lg font-bold text-slate-800 mb-4">Status Breakdown</h3>
+          <div className="h-64">
+            {pieData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                <PieChart>
+                  <Pie data={pieData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
+                    {pieData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
+                  </Pie>
+                  <RechartsTooltip contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} />
+                  <Legend wrapperStyle={{fontSize: '12px'}} />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-slate-400">No data available</div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ==========================================
+// 5. EMPLOYEE MANAGEMENT VIEW
 // ==========================================
 function EmployeeManagementView({ employees, shifts, showNotification, onEmployeeClick }) {
   const [searchTerm, setSearchTerm] = useState('');
@@ -1237,37 +1485,65 @@ function EmployeeManagementView({ employees, shifts, showNotification, onEmploye
         </div>
       </header>
 
-      {isFormOpen && (
-        <div className="mb-6 bg-white p-6 rounded-xl border border-blue-200 shadow-sm animate-fadeIn">
-          <form onSubmit={handleSave} className="grid grid-cols-1 md:grid-cols-6 gap-4">
-            <div><label className="block text-xs font-medium text-slate-600 mb-1">Emp ID</label><input required value={form.empId} onChange={e => setForm({...form, empId: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500" /></div>
-            <div><label className="block text-xs font-medium text-slate-600 mb-1">Name</label><input required value={form.name} onChange={e => setForm({...form, name: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500" /></div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Department</label>
-              <select required value={form.departmentId} onChange={e => setForm({...form, departmentId: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500">
-                {MASTER_DEPARTMENTS.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Shift</label>
-              <select value={form.shiftId} onChange={e => setForm({...form, shiftId: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500">
-                <option value="">-- No Shift --</option>
-                {shifts.map(s => <option key={s.id} value={s.id}>{s.name} ({s.startTime} - {s.endTime})</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Status</label>
-              <select value={form.status} onChange={e => setForm({...form, status: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500">
-                {EMPLOYEE_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
-            <div className="flex items-end gap-2">
-              <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded font-medium hover:bg-blue-700 transition-colors">Save</button>
-              <button type="button" onClick={() => setIsFormOpen(false)} className="px-4 py-2 text-slate-600 border rounded font-medium hover:bg-slate-50 transition-colors">Cancel</button>
-            </div>
-          </form>
-        </div>
-      )}
+      <AnimatePresence>
+        {isFormOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              className="bg-white rounded-xl shadow-xl max-w-2xl w-full p-6 relative"
+            >
+              <button 
+                onClick={() => setIsFormOpen(false)} 
+                className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <X size={20} />
+              </button>
+              <h3 className="text-lg font-bold text-slate-800 mb-4">{editingId ? 'Edit Employee' : 'Add New Employee'}</h3>
+              <form onSubmit={handleSave} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div><label className="block text-xs font-medium text-slate-600 mb-1">Emp ID</label><input required value={form.empId} onChange={e => setForm({...form, empId: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500" /></div>
+                <div><label className="block text-xs font-medium text-slate-600 mb-1">Name</label><input required value={form.name} onChange={e => setForm({...form, name: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500" /></div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Department</label>
+                  <select required value={form.departmentId} onChange={e => setForm({...form, departmentId: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500">
+                    {MASTER_DEPARTMENTS.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Shift</label>
+                  <select value={form.shiftId} onChange={e => setForm({...form, shiftId: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500">
+                    <option value="">-- No Shift --</option>
+                    {shifts.map(s => <option key={s.id} value={s.id}>{s.name} ({s.startTime} - {s.endTime})</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Status</label>
+                  <select value={form.status} onChange={e => setForm({...form, status: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500">
+                    {EMPLOYEE_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div className="sm:col-span-2 flex justify-end gap-2 mt-4 pt-4 border-t border-slate-100">
+                  <button type="button" onClick={() => setIsFormOpen(false)} className="px-4 py-2 text-slate-600 border rounded font-medium hover:bg-slate-50 transition-colors">Cancel</button>
+                  <motion.button 
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    type="submit" 
+                    className="px-4 py-2 bg-blue-600 text-white rounded font-medium hover:bg-blue-700 transition-colors"
+                  >
+                    Save Employee
+                  </motion.button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200">
         <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-col md:flex-row gap-4 justify-between items-center">
@@ -1789,32 +2065,46 @@ function ShiftsView({ shifts, showNotification }) {
         </button>
       </header>
 
-      {isFormOpen && (
-        <div className="mb-6 bg-white p-6 rounded-xl border border-blue-200 shadow-sm animate-fadeIn">
-          <form onSubmit={handleSave} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Shift Name</label>
-              <input required value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="e.g., Morning Shift" className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Description</label>
-              <input value={form.description} onChange={e => setForm({...form, description: e.target.value})} placeholder="Optional description" className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Start Time</label>
-              <input type="time" required value={form.startTime} onChange={e => setForm({...form, startTime: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">End Time</label>
-              <input type="time" required value={form.endTime} onChange={e => setForm({...form, endTime: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500" />
-            </div>
-            <div className="md:col-span-2 flex items-end gap-2 mt-2">
-              <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded font-medium hover:bg-blue-700 transition-colors">Save</button>
-              <button type="button" onClick={() => setIsFormOpen(false)} className="px-4 py-2 text-slate-600 border rounded font-medium hover:bg-slate-50 transition-colors">Cancel</button>
-            </div>
-          </form>
-        </div>
-      )}
+      <AnimatePresence>
+        {isFormOpen && (
+          <motion.div 
+            initial={{ opacity: 0, height: 0, overflow: 'hidden' }}
+            animate={{ opacity: 1, height: 'auto', overflow: 'visible' }}
+            exit={{ opacity: 0, height: 0, overflow: 'hidden' }}
+            className="mb-6 bg-white p-6 rounded-xl border border-blue-200 shadow-sm"
+          >
+            <form onSubmit={handleSave} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Shift Name</label>
+                <input required value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="e.g., Morning Shift" className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Description</label>
+                <input value={form.description} onChange={e => setForm({...form, description: e.target.value})} placeholder="Optional description" className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Start Time</label>
+                <input type="time" required value={form.startTime} onChange={e => setForm({...form, startTime: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">End Time</label>
+                <input type="time" required value={form.endTime} onChange={e => setForm({...form, endTime: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500" />
+              </div>
+              <div className="md:col-span-2 flex items-end gap-2 mt-2">
+                <motion.button 
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  type="submit" 
+                  className="px-4 py-2 bg-blue-600 text-white rounded font-medium hover:bg-blue-700 transition-colors"
+                >
+                  Save
+                </motion.button>
+                <button type="button" onClick={() => setIsFormOpen(false)} className="px-4 py-2 text-slate-600 border rounded font-medium hover:bg-slate-50 transition-colors">Cancel</button>
+              </div>
+            </form>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {shifts.map(shift => (
@@ -1838,6 +2128,232 @@ function ShiftsView({ shifts, showNotification }) {
             No shifts defined yet. Click "Add Shift" to create one.
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// 9. LEAVE REQUESTS VIEW
+// ==========================================
+function LeaveRequestsView({ leaveRequests, employees, currentUserRole, user, showNotification }) {
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [form, setForm] = useState({ empId: '', leaveType: 'Sick', startDate: getMyanmarDateString(), endDate: getMyanmarDateString(), reason: '' });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!form.empId || !form.startDate || !form.endDate || !form.reason) {
+      return showNotification("Please fill in all required fields.", 'error');
+    }
+
+    setIsSubmitting(true);
+    try {
+      const employee = employees.find(emp => emp.empId === form.empId);
+      const leaveReqData = {
+        employeeId: form.empId,
+        employeeName: employee ? employee.name : 'Unknown',
+        departmentId: employee ? employee.departmentId : 'Unknown',
+        leaveType: form.leaveType,
+        startDate: form.startDate,
+        endDate: form.endDate,
+        reason: form.reason,
+        status: 'Pending',
+        submittedAt: new Date().toISOString(),
+        submittedBy: user.uid
+      };
+
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'leave_requests'), leaveReqData);
+      showNotification("Leave request submitted successfully!");
+      setIsFormOpen(false);
+      setForm({ empId: '', leaveType: 'Sick', startDate: getMyanmarDateString(), endDate: getMyanmarDateString(), reason: '' });
+    } catch (error) {
+      console.error("Error submitting leave request:", error);
+      showNotification("Failed to submit leave request.", 'error');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleStatusUpdate = async (id, newStatus) => {
+    try {
+      const reqRef = doc(db, 'artifacts', appId, 'public', 'data', 'leave_requests', id);
+      await updateDoc(reqRef, {
+        status: newStatus,
+        reviewedBy: user.email,
+        reviewedAt: new Date().toISOString()
+      });
+      showNotification(`Leave request ${newStatus.toLowerCase()} successfully.`);
+    } catch (error) {
+      console.error("Error updating status:", error);
+      showNotification("Failed to update status.", 'error');
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (window.confirm("Are you sure you want to delete this leave request?")) {
+      try {
+        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'leave_requests', id));
+        showNotification("Leave request deleted.");
+      } catch (error) {
+        console.error("Error deleting request:", error);
+        showNotification("Failed to delete request.", 'error');
+      }
+    }
+  };
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'Approved': return 'bg-green-100 text-green-800 border-green-200';
+      case 'Rejected': return 'bg-red-100 text-red-800 border-red-200';
+      default: return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+    }
+  };
+
+  const visibleRequests = ['Admin', 'Super Admin'].includes(currentUserRole) 
+    ? leaveRequests 
+    : leaveRequests.filter(req => req.submittedBy === user.uid);
+
+  return (
+    <div className="max-w-6xl mx-auto animate-fadeIn">
+      <header className="mb-6 flex justify-between items-center flex-wrap gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-800">Leave Requests</h2>
+          <p className="text-slate-500">Submit and manage employee leave requests.</p>
+        </div>
+        <button onClick={() => setIsFormOpen(!isFormOpen)} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm transition-colors">
+          {isFormOpen ? <X size={18} /> : <Plus size={18} />} {isFormOpen ? 'Cancel' : 'New Request'}
+        </button>
+      </header>
+
+      <AnimatePresence>
+        {isFormOpen && (
+          <motion.div 
+            initial={{ opacity: 0, height: 0, overflow: 'hidden' }}
+            animate={{ opacity: 1, height: 'auto', overflow: 'visible' }}
+            exit={{ opacity: 0, height: 0, overflow: 'hidden' }}
+            className="mb-8"
+          >
+            <div className="bg-white p-6 rounded-xl border border-blue-200 shadow-sm">
+              <h3 className="text-lg font-bold text-slate-800 mb-4 border-b pb-2">Submit Leave Request</h3>
+              <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Employee</label>
+                  <select required value={form.empId} onChange={e => setForm({...form, empId: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500">
+                    <option value="">Select Employee</option>
+                    {employees.filter(e => e.status === 'Active').map(emp => (
+                      <option key={emp.empId} value={emp.empId}>{emp.name} ({emp.empId})</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Leave Type</label>
+                  <select required value={form.leaveType} onChange={e => setForm({...form, leaveType: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500">
+                    <option value="Sick">Sick Leave</option>
+                    <option value="Vacation">Vacation</option>
+                    <option value="Personal">Personal Leave</option>
+                    <option value="Maternity">Maternity Leave</option>
+                    <option value="Unpaid">Unpaid Leave</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Start Date</label>
+                  <input type="date" required value={form.startDate} onChange={e => setForm({...form, startDate: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">End Date</label>
+                  <input type="date" required value={form.endDate} onChange={e => setForm({...form, endDate: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500" />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Reason</label>
+                  <textarea required value={form.reason} onChange={e => setForm({...form, reason: e.target.value})} rows={3} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500" placeholder="Please provide a brief reason for the leave..."></textarea>
+                </div>
+                <div className="md:col-span-2 flex justify-end mt-2">
+                  <motion.button 
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    type="submit" 
+                    disabled={isSubmitting}
+                    className={`px-6 py-2 bg-blue-600 text-white rounded-lg font-medium transition-colors flex items-center gap-2 ${isSubmitting ? 'opacity-70 cursor-not-allowed' : 'hover:bg-blue-700'}`}
+                  >
+                    {isSubmitting ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div> : null}
+                    Submit Request
+                  </motion.button>
+                </div>
+              </form>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-50 text-slate-600 text-sm border-b border-slate-200">
+                <th className="p-4 font-medium">Employee</th>
+                <th className="p-4 font-medium">Leave Type</th>
+                <th className="p-4 font-medium">Duration</th>
+                <th className="p-4 font-medium">Reason</th>
+                <th className="p-4 font-medium">Status</th>
+                <th className="p-4 font-medium text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {visibleRequests.sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()).map(req => (
+                <tr key={req.id} className="hover:bg-slate-50 transition-colors">
+                  <td className="p-4">
+                    <div className="font-medium text-slate-800">{req.employeeName}</div>
+                    <div className="text-xs text-slate-500">{req.employeeId}</div>
+                  </td>
+                  <td className="p-4">
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                      {req.leaveType}
+                    </span>
+                  </td>
+                  <td className="p-4">
+                    <div className="text-sm text-slate-700">{req.startDate}</div>
+                    <div className="text-xs text-slate-500">to {req.endDate}</div>
+                  </td>
+                  <td className="p-4 max-w-xs">
+                    <p className="text-sm text-slate-600 truncate" title={req.reason}>{req.reason}</p>
+                  </td>
+                  <td className="p-4">
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getStatusColor(req.status)}`}>
+                      {req.status}
+                    </span>
+                  </td>
+                  <td className="p-4 text-right">
+                    <div className="flex justify-end gap-2">
+                      {['Admin', 'Super Admin'].includes(currentUserRole) && req.status === 'Pending' && (
+                        <>
+                          <button onClick={() => handleStatusUpdate(req.id, 'Approved')} className="text-green-600 hover:bg-green-50 p-1.5 rounded transition-colors" title="Approve">
+                            <CheckSquare size={18} />
+                          </button>
+                          <button onClick={() => handleStatusUpdate(req.id, 'Rejected')} className="text-red-600 hover:bg-red-50 p-1.5 rounded transition-colors" title="Reject">
+                            <X size={18} />
+                          </button>
+                        </>
+                      )}
+                      {['Admin', 'Super Admin'].includes(currentUserRole) && (
+                        <button onClick={() => handleDelete(req.id)} className="text-slate-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded transition-colors" title="Delete">
+                          <Trash2 size={18} />
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {visibleRequests.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="p-8 text-center text-slate-500 italic">
+                    No leave requests found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
