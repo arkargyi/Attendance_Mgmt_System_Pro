@@ -248,10 +248,13 @@ export default function App() {
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
-              className={`absolute top-4 right-4 z-50 px-4 py-3 rounded-md shadow-lg flex items-center gap-2 max-w-md ${notification.type === 'error' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}
+              className={`absolute top-4 right-4 z-50 px-4 py-3 rounded-md shadow-lg flex items-start gap-2 max-w-md ${notification.type === 'error' ? 'bg-red-100 text-red-800 border border-red-200' : 'bg-green-100 text-green-800 border border-green-200'}`}
             >
-              <AlertTriangle size={20} className="flex-shrink-0" />
-              <span className="font-medium text-sm leading-snug">{notification.message}</span>
+              <AlertTriangle size={20} className="flex-shrink-0 mt-0.5" />
+              <span className="font-medium text-sm leading-snug flex-1">{notification.message}</span>
+              <button onClick={() => setNotification(null)} className="flex-shrink-0 opacity-70 hover:opacity-100 transition-opacity">
+                <X size={16} />
+              </button>
             </motion.div>
           )}
         </AnimatePresence>
@@ -381,10 +384,13 @@ export default function App() {
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
-              className={`absolute top-4 right-4 z-50 px-4 py-3 rounded-md shadow-lg flex items-center gap-2 max-w-md ${notification.type === 'error' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}
+              className={`absolute top-4 right-4 z-50 px-4 py-3 rounded-md shadow-lg flex items-start gap-2 max-w-md ${notification.type === 'error' ? 'bg-red-100 text-red-800 border border-red-200' : 'bg-green-100 text-green-800 border border-green-200'}`}
             >
-              <AlertTriangle size={20} className="flex-shrink-0" />
-              <span className="font-medium text-sm">{notification.message}</span>
+              <AlertTriangle size={20} className="flex-shrink-0 mt-0.5" />
+              <span className="font-medium text-sm flex-1">{notification.message}</span>
+              <button onClick={() => setNotification(null)} className="flex-shrink-0 opacity-70 hover:opacity-100 transition-opacity">
+                <X size={16} />
+              </button>
             </motion.div>
           )}
         </AnimatePresence>
@@ -412,7 +418,7 @@ export default function App() {
               >
                 {currentView === 'dashboard' && <DashboardView employees={employees} attendances={attendances} />}
                 {currentView === 'submit' && <SubmitAttendanceView employees={employees} attendances={attendances} showNotification={showNotification} />}
-                {currentView === 'leaveRequests' && <LeaveRequestsView leaveRequests={leaveRequests} employees={employees} currentUserRole={currentUserRole} user={user} showNotification={showNotification} />}
+                {currentView === 'leaveRequests' && <LeaveRequestsView leaveRequests={leaveRequests} employees={employees} attendances={attendances} currentUserRole={currentUserRole} user={user} showNotification={showNotification} />}
                 
                 {/* Protected Routes Handling */}
                 {['Admin', 'Super Admin'].includes(currentUserRole) && currentView === 'history' && <HistoryView attendances={attendances} employees={employees} showNotification={showNotification} onEmployeeClick={(id) => { setPreviousView(currentView); setSelectedEmployeeId(id); setCurrentView('employeeProfile'); }} />}
@@ -503,6 +509,40 @@ function DashboardView({ employees, attendances }) {
       };
     });
   }, [attendances, selectedDate]);
+
+  const submissionData = useMemo(() => {
+    const activeEmps = employees.filter(e => e.status === 'Active');
+    const uniqueEmpIdsToday = new Set(todaysRecords.map(r => r.empId));
+    const submitted = uniqueEmpIdsToday.size;
+    const notSubmitted = Math.max(0, activeEmps.length - submitted);
+    
+    return [
+      { name: 'Submitted', value: submitted, color: '#3b82f6' },
+      { name: 'Not Submitted', value: notSubmitted, color: '#94a3b8' }
+    ].filter(d => d.value > 0);
+  }, [employees, todaysRecords]);
+
+  const deptAttendanceRates = useMemo(() => {
+    const activeEmps = employees.filter(e => e.status === 'Active');
+    const rates = MASTER_DEPARTMENTS.map(dept => {
+      const deptEmps = activeEmps.filter(e => e.departmentId === dept.id || e.department === dept.name);
+      const total = deptEmps.length;
+      
+      const attendedCount = deptEmps.filter(emp => {
+        const record = todaysRecords.find(r => r.empId === emp.empId);
+        return record && ['Present', 'Late', 'Half-Day'].includes(record.status);
+      }).length;
+
+      const rate = total > 0 ? Math.round((attendedCount / total) * 100) : 0;
+      return {
+        name: dept.name,
+        total,
+        attended: attendedCount,
+        rate
+      };
+    }).filter(d => d.total > 0);
+    return rates;
+  }, [employees, todaysRecords]);
 
   return (
     <div className="space-y-6 animate-fadeIn">
@@ -620,7 +660,36 @@ function DashboardView({ employees, attendances }) {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-          <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2"><BarChart3 size={18}/> Today's Attendance</h3>
+          <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2"><BarChart3 size={18}/> Submission Status</h3>
+          <div className="h-64">
+            {submissionData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                <PieChart>
+                  <Pie
+                    data={submissionData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={80}
+                    paddingAngle={5}
+                    dataKey="value"
+                  >
+                    {submissionData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <RechartsTooltip />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-slate-400 italic">No active employees</div>
+            )}
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+          <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2"><BarChart3 size={18}/> Today's Attendance Types</h3>
           <div className="h-64">
             {pieData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
@@ -648,7 +717,22 @@ function DashboardView({ employees, attendances }) {
           </div>
         </div>
 
-        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm lg:col-span-2">
+          <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2"><BarChart3 size={18}/> Department Attendance Rate</h3>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+              <BarChart data={deptAttendanceRates}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} domain={[0, 100]} tickFormatter={(val) => `${val}%`} />
+                <RechartsTooltip cursor={{ fill: '#f1f5f9' }} formatter={(value) => [`${value}%`, 'Attendance Rate']} />
+                <Bar dataKey="rate" fill="#3b82f6" radius={[4, 4, 0, 0]} name="Attendance Rate" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm lg:col-span-2">
           <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2"><BarChart3 size={18}/> Last 7 Days Trend</h3>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
@@ -923,6 +1007,38 @@ function HistoryView({ attendances, employees, showNotification, onEmployeeClick
     await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'attendances', id));
   };
 
+  const handleBulkDelete = async () => {
+    if (sortedAndFilteredRecords.length === 0) {
+      showNotification("No records to delete.", "error");
+      return;
+    }
+    
+    if (!window.confirm(`Are you sure you want to delete ${sortedAndFilteredRecords.length} records? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      const chunks = [];
+      for (let i = 0; i < sortedAndFilteredRecords.length; i += 500) {
+        chunks.push(sortedAndFilteredRecords.slice(i, i + 500));
+      }
+
+      for (const chunk of chunks) {
+        const batch = writeBatch(db);
+        chunk.forEach(record => {
+          const ref = doc(db, 'artifacts', appId, 'public', 'data', 'attendances', record.id);
+          batch.delete(ref);
+        });
+        await batch.commit();
+      }
+
+      showNotification(`Successfully deleted ${sortedAndFilteredRecords.length} records.`);
+    } catch (error) {
+      console.error("Error bulk deleting:", error);
+      showNotification("Failed to delete records.", "error");
+    }
+  };
+
   const exportToCSV = () => {
     if (sortedAndFilteredRecords.length === 0) {
       showNotification("No records to export.", "error");
@@ -974,6 +1090,13 @@ function HistoryView({ attendances, employees, showNotification, onEmployeeClick
           <p className="text-slate-500">Default view is today's report. Use filters for custom range.</p>
         </div>
         <div className="flex gap-2">
+          <button 
+            onClick={handleBulkDelete}
+            className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm"
+          >
+            <Trash2 size={16} />
+            Clear Records
+          </button>
           <button 
             onClick={() => setIsFilterOpen(!isFilterOpen)}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors border ${isFilterOpen ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
@@ -1273,6 +1396,9 @@ function EmployeeManagementView({ employees, shifts, showNotification, onEmploye
   const [form, setForm] = useState({ empId: '', name: '', departmentId: MASTER_DEPARTMENTS[0].id, status: 'Active', resignDate: '', shiftId: '' });
   const [aiInsight, setAiInsight] = useState('');
   const [isGeneratingInsight, setIsGeneratingInsight] = useState(false);
+  const [selectedEmpIds, setSelectedEmpIds] = useState([]);
+  const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
+  const [bulkEditForm, setBulkEditForm] = useState({ departmentId: '', status: '', shiftId: '' });
 
   const [sortConfig, setSortConfig] = useState({ key: 'empId', direction: 'asc' });
 
@@ -1362,6 +1488,43 @@ function EmployeeManagementView({ employees, shifts, showNotification, onEmploye
       showNotification("Employee saved successfully.");
     } catch (error) {
       showNotification("Error: " + error.message, 'error');
+    }
+  };
+
+  const toggleEmployee = (id) => {
+    setSelectedEmpIds(prev => prev.includes(id) ? prev.filter(empId => empId !== id) : [...prev, id]);
+  };
+
+  const toggleAll = () => {
+    if (selectedEmpIds.length === sortedAndFilteredEmployees.length) setSelectedEmpIds([]);
+    else setSelectedEmpIds(sortedAndFilteredEmployees.map(e => e.id));
+  };
+
+  const handleBulkEditSubmit = async (e) => {
+    e.preventDefault();
+    if (!window.confirm(`Are you sure you want to update ${selectedEmpIds.length} employees?`)) return;
+
+    try {
+      const batch = writeBatch(db);
+      selectedEmpIds.forEach(id => {
+        const ref = doc(db, 'artifacts', appId, 'public', 'data', 'employees', id);
+        const updates: any = {};
+        if (bulkEditForm.departmentId) updates.departmentId = bulkEditForm.departmentId;
+        if (bulkEditForm.status) updates.status = bulkEditForm.status;
+        if (bulkEditForm.shiftId) updates.shiftId = bulkEditForm.shiftId;
+        
+        if (Object.keys(updates).length > 0) {
+          batch.update(ref, updates);
+        }
+      });
+      await batch.commit();
+      showNotification(`Successfully updated ${selectedEmpIds.length} employees.`);
+      setIsBulkEditOpen(false);
+      setSelectedEmpIds([]);
+      setBulkEditForm({ departmentId: '', status: '', shiftId: '' });
+    } catch (error) {
+      console.error("Error bulk editing:", error);
+      showNotification("Failed to update employees.", "error");
     }
   };
 
@@ -1474,6 +1637,11 @@ function EmployeeManagementView({ employees, shifts, showNotification, onEmploye
           <p className="text-slate-500">Employee များသည် Department (Master Data) နှင့် တိုက်ရိုက်ချိတ်ဆက်ထားပါသည်။</p>
         </div>
         <div className="flex gap-2">
+          {selectedEmpIds.length > 0 && (
+            <button onClick={() => setIsBulkEditOpen(true)} className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm transition-colors">
+              <Edit size={18} /> Bulk Edit ({selectedEmpIds.length})
+            </button>
+          )}
           <button onClick={exportToCSV} className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm transition-colors">
             <Download size={18} /> Export
           </button>
@@ -1545,6 +1713,67 @@ function EmployeeManagementView({ employees, shifts, showNotification, onEmploye
         )}
       </AnimatePresence>
 
+      <AnimatePresence>
+        {isBulkEditOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 relative"
+            >
+              <button 
+                onClick={() => setIsBulkEditOpen(false)} 
+                className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <X size={20} />
+              </button>
+              <h3 className="text-lg font-bold text-slate-800 mb-4">Bulk Edit Employees</h3>
+              <p className="text-sm text-slate-500 mb-4">Update fields for {selectedEmpIds.length} selected employees. Leave fields blank to keep existing values.</p>
+              <form onSubmit={handleBulkEditSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Department</label>
+                  <select value={bulkEditForm.departmentId} onChange={e => setBulkEditForm({...bulkEditForm, departmentId: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500">
+                    <option value="">-- Do not change --</option>
+                    {MASTER_DEPARTMENTS.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Shift</label>
+                  <select value={bulkEditForm.shiftId} onChange={e => setBulkEditForm({...bulkEditForm, shiftId: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500">
+                    <option value="">-- Do not change --</option>
+                    {shifts.map(s => <option key={s.id} value={s.id}>{s.name} ({s.startTime} - {s.endTime})</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Status</label>
+                  <select value={bulkEditForm.status} onChange={e => setBulkEditForm({...bulkEditForm, status: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500">
+                    <option value="">-- Do not change --</option>
+                    {EMPLOYEE_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-slate-100">
+                  <button type="button" onClick={() => setIsBulkEditOpen(false)} className="px-4 py-2 text-slate-600 border rounded font-medium hover:bg-slate-50 transition-colors">Cancel</button>
+                  <motion.button 
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    type="submit" 
+                    className="px-4 py-2 bg-amber-500 text-white rounded font-medium hover:bg-amber-600 transition-colors"
+                  >
+                    Apply Changes
+                  </motion.button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <div className="bg-white rounded-xl shadow-sm border border-slate-200">
         <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-col md:flex-row gap-4 justify-between items-center">
           <div className="relative max-w-sm w-full">
@@ -1584,6 +1813,14 @@ function EmployeeManagementView({ employees, shifts, showNotification, onEmploye
           <table className="w-full text-left text-sm whitespace-nowrap">
             <thead className="bg-slate-50 text-slate-600 border-b">
               <tr>
+                <th className="p-4 w-12">
+                  <input 
+                    type="checkbox" 
+                    checked={selectedEmpIds.length === sortedAndFilteredEmployees.length && sortedAndFilteredEmployees.length > 0}
+                    onChange={toggleAll}
+                    className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer w-4 h-4"
+                  />
+                </th>
                 <SortableHeader label="Emp ID" sortKey="empId" />
                 <SortableHeader label="Name" sortKey="name" />
                 <SortableHeader label="Department (Relational)" sortKey="departmentId" />
@@ -1594,7 +1831,15 @@ function EmployeeManagementView({ employees, shifts, showNotification, onEmploye
             </thead>
             <tbody className="divide-y divide-slate-100">
               {sortedAndFilteredEmployees.map(emp => (
-                <tr key={emp.id} className="hover:bg-slate-50 transition-colors">
+                <tr key={emp.id} className={`hover:bg-slate-50 transition-colors ${selectedEmpIds.includes(emp.id) ? 'bg-blue-50/50' : ''}`}>
+                  <td className="p-4">
+                    <input 
+                      type="checkbox" 
+                      checked={selectedEmpIds.includes(emp.id)}
+                      onChange={() => toggleEmployee(emp.id)}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer w-4 h-4"
+                    />
+                  </td>
                   <td className="p-4 font-medium text-blue-600 cursor-pointer hover:underline" onClick={() => onEmployeeClick && onEmployeeClick(emp.empId)}>{emp.empId}</td>
                   <td className="p-4 cursor-pointer hover:text-blue-600 flex items-center gap-3" onClick={() => onEmployeeClick && onEmployeeClick(emp.empId)}>
                     <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-bold shadow-inner overflow-hidden flex-shrink-0">
@@ -2136,10 +2381,15 @@ function ShiftsView({ shifts, showNotification }) {
 // ==========================================
 // 9. LEAVE REQUESTS VIEW
 // ==========================================
-function LeaveRequestsView({ leaveRequests, employees, currentUserRole, user, showNotification }) {
+function LeaveRequestsView({ leaveRequests, employees, attendances, currentUserRole, user, showNotification }) {
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [departmentId, setDepartmentId] = useState('');
   const [form, setForm] = useState({ empId: '', leaveType: 'Sick', startDate: getMyanmarDateString(), endDate: getMyanmarDateString(), reason: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const filteredEmployees = useMemo(() => {
+    return employees.filter(e => e.departmentId === departmentId && e.status === 'Active');
+  }, [employees, departmentId]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -2167,6 +2417,7 @@ function LeaveRequestsView({ leaveRequests, employees, currentUserRole, user, sh
       showNotification("Leave request submitted successfully!");
       setIsFormOpen(false);
       setForm({ empId: '', leaveType: 'Sick', startDate: getMyanmarDateString(), endDate: getMyanmarDateString(), reason: '' });
+      setDepartmentId('');
     } catch (error) {
       console.error("Error submitting leave request:", error);
       showNotification("Failed to submit leave request.", 'error');
@@ -2177,12 +2428,53 @@ function LeaveRequestsView({ leaveRequests, employees, currentUserRole, user, sh
 
   const handleStatusUpdate = async (id, newStatus) => {
     try {
+      const req = leaveRequests.find(r => r.id === id);
+      if (!req) return;
+
+      const batch = writeBatch(db);
       const reqRef = doc(db, 'artifacts', appId, 'public', 'data', 'leave_requests', id);
-      await updateDoc(reqRef, {
+      batch.update(reqRef, {
         status: newStatus,
         reviewedBy: user.email,
         reviewedAt: new Date().toISOString()
       });
+
+      // If approved or rejected, record attendance
+      if (newStatus === 'Approved' || newStatus === 'Rejected') {
+        const attendanceStatus = newStatus === 'Approved' ? 'Leave' : 'Absent';
+        const startDate = new Date(req.startDate);
+        const endDate = new Date(req.endDate);
+        
+        // Loop through each day in the leave request
+        for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+          const dateStr = d.toISOString().split('T')[0];
+          
+          // Check if attendance already exists for this employee on this date
+          const existingRecord = attendances.find(a => a.empId === req.employeeId && a.date === dateStr);
+          
+          if (existingRecord) {
+            // Update existing record
+            const attRef = doc(db, 'artifacts', appId, 'public', 'data', 'attendances', existingRecord.id);
+            batch.update(attRef, {
+              status: attendanceStatus,
+              timestamp: new Date().toISOString()
+            });
+          } else {
+            // Create new record
+            const newAttRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'attendances'));
+            batch.set(newAttRef, {
+              date: dateStr,
+              departmentId: req.departmentId,
+              empId: req.employeeId,
+              empName: req.employeeName,
+              status: attendanceStatus,
+              timestamp: new Date().toISOString()
+            });
+          }
+        }
+      }
+
+      await batch.commit();
       showNotification(`Leave request ${newStatus.toLowerCase()} successfully.`);
     } catch (error) {
       console.error("Error updating status:", error);
@@ -2199,6 +2491,38 @@ function LeaveRequestsView({ leaveRequests, employees, currentUserRole, user, sh
         console.error("Error deleting request:", error);
         showNotification("Failed to delete request.", 'error');
       }
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (visibleRequests.length === 0) {
+      showNotification("No records to delete.", "error");
+      return;
+    }
+    
+    if (!window.confirm(`Are you sure you want to delete ${visibleRequests.length} leave requests? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      const chunks = [];
+      for (let i = 0; i < visibleRequests.length; i += 500) {
+        chunks.push(visibleRequests.slice(i, i + 500));
+      }
+
+      for (const chunk of chunks) {
+        const batch = writeBatch(db);
+        chunk.forEach(record => {
+          const ref = doc(db, 'artifacts', appId, 'public', 'data', 'leave_requests', record.id);
+          batch.delete(ref);
+        });
+        await batch.commit();
+      }
+
+      showNotification(`Successfully deleted ${visibleRequests.length} leave requests.`);
+    } catch (error) {
+      console.error("Error bulk deleting:", error);
+      showNotification("Failed to delete leave requests.", "error");
     }
   };
 
@@ -2221,9 +2545,16 @@ function LeaveRequestsView({ leaveRequests, employees, currentUserRole, user, sh
           <h2 className="text-2xl font-bold text-slate-800">Leave Requests</h2>
           <p className="text-slate-500">Submit and manage employee leave requests.</p>
         </div>
-        <button onClick={() => setIsFormOpen(!isFormOpen)} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm transition-colors">
-          {isFormOpen ? <X size={18} /> : <Plus size={18} />} {isFormOpen ? 'Cancel' : 'New Request'}
-        </button>
+        <div className="flex gap-2">
+          {['Admin', 'Super Admin'].includes(currentUserRole) && (
+            <button onClick={handleBulkDelete} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm transition-colors">
+              <Trash2 size={18} /> Clear Records
+            </button>
+          )}
+          <button onClick={() => setIsFormOpen(!isFormOpen)} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm transition-colors">
+            {isFormOpen ? <X size={18} /> : <Plus size={18} />} {isFormOpen ? 'Cancel' : 'New Request'}
+          </button>
+        </div>
       </header>
 
       <AnimatePresence>
@@ -2238,10 +2569,19 @@ function LeaveRequestsView({ leaveRequests, employees, currentUserRole, user, sh
               <h3 className="text-lg font-bold text-slate-800 mb-4 border-b pb-2">Submit Leave Request</h3>
               <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Department</label>
+                  <select required value={departmentId} onChange={e => { setDepartmentId(e.target.value); setForm({...form, empId: ''}); }} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500">
+                    <option value="">Select Department</option>
+                    {MASTER_DEPARTMENTS.map(dept => (
+                      <option key={dept.id} value={dept.id}>{dept.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
                   <label className="block text-xs font-medium text-slate-600 mb-1">Employee</label>
-                  <select required value={form.empId} onChange={e => setForm({...form, empId: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500">
+                  <select required value={form.empId} onChange={e => setForm({...form, empId: e.target.value})} disabled={!departmentId} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-slate-100 disabled:text-slate-400">
                     <option value="">Select Employee</option>
-                    {employees.filter(e => e.status === 'Active').map(emp => (
+                    {filteredEmployees.map(emp => (
                       <option key={emp.empId} value={emp.empId}>{emp.name} ({emp.empId})</option>
                     ))}
                   </select>
