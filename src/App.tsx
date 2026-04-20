@@ -417,7 +417,7 @@ export default function App() {
                 className="h-full"
               >
                 {currentView === 'dashboard' && <DashboardView employees={employees} attendances={attendances} />}
-                {currentView === 'submit' && <SubmitAttendanceView employees={employees} attendances={attendances} showNotification={showNotification} />}
+                {currentView === 'submit' && <SubmitAttendanceView employees={employees} attendances={attendances} showNotification={showNotification} user={user} />}
                 {currentView === 'leaveRequests' && <LeaveRequestsView leaveRequests={leaveRequests} employees={employees} attendances={attendances} currentUserRole={currentUserRole} user={user} showNotification={showNotification} />}
                 
                 {/* Protected Routes Handling */}
@@ -428,7 +428,7 @@ export default function App() {
                 
                 {currentUserRole === 'Super Admin' && currentView === 'settings' && <SettingsView appUsers={appUsers} showNotification={showNotification} currentUid={user.uid} />}
                 
-                {currentView === 'employeeProfile' && <EmployeeProfileView employeeId={selectedEmployeeId} employees={employees} attendances={attendances} appUsers={appUsers} shifts={shifts} onBack={() => setCurrentView(previousView)} showNotification={showNotification} />}
+                {currentView === 'employeeProfile' && <EmployeeProfileView employeeId={selectedEmployeeId} employees={employees} attendances={attendances} appUsers={appUsers} shifts={shifts} onBack={() => setCurrentView(previousView)} showNotification={showNotification} currentUserRole={currentUserRole} />}
               </motion.div>
             )}
           </AnimatePresence>
@@ -785,7 +785,7 @@ const StatCard = ({ title, value, color, onClick, isActive }: { title: string, v
 // ==========================================
 // 2. SUBMIT ATTENDANCE VIEW
 // ==========================================
-function SubmitAttendanceView({ employees, attendances, showNotification }) {
+function SubmitAttendanceView({ employees, attendances, showNotification, user }) {
   const [date, setDate] = useState(getMyanmarDateString());
   const [departmentId, setDepartmentId] = useState('');
   const [status, setStatus] = useState('Present');
@@ -848,7 +848,8 @@ function SubmitAttendanceView({ employees, attendances, showNotification }) {
             empId: emp.empId,
             empName: emp.name,
             status,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            submittedByEmail: user?.email || 'Unknown'
           });
         }
       });
@@ -1177,6 +1178,7 @@ function HistoryView({ attendances, employees, showNotification, onEmployeeClick
                 <SortableHeader label="Emp ID" sortKey="empId" />
                 <SortableHeader label="Name" sortKey="empName" />
                 <SortableHeader label="Status" sortKey="status" />
+                <SortableHeader label="Submitted By" sortKey="submittedByEmail" />
                 <th className="p-4 font-medium text-right">Actions</th>
               </tr>
             </thead>
@@ -1203,6 +1205,7 @@ function HistoryView({ attendances, employees, showNotification, onEmployeeClick
                       </div>
                     </td>
                     <td className="p-4"><span className="px-2 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700">{record.status}</span></td>
+                    <td className="p-4 text-xs text-slate-500">{record.submittedByEmail || 'N/A'}</td>
                     <td className="p-4 text-right">
                       <button onClick={() => handleDelete(record.id)} className="text-red-500 hover:text-red-700 transition-colors"><Trash2 size={16}/></button>
                     </td>
@@ -1491,6 +1494,33 @@ function EmployeeManagementView({ employees, shifts, showNotification, onEmploye
     }
   };
 
+  const handleDeleteEmployee = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this employee? This action cannot be undone.")) return;
+    try {
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'employees', id));
+      showNotification("Employee deleted successfully.");
+    } catch (error) {
+      showNotification("Error deleting employee: " + error.message, 'error');
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (!window.confirm(`Are you sure you want to delete ${selectedEmpIds.length} employees? This action cannot be undone.`)) return;
+    try {
+      const batch = writeBatch(db);
+      selectedEmpIds.forEach(id => {
+        const ref = doc(db, 'artifacts', appId, 'public', 'data', 'employees', id);
+        batch.delete(ref);
+      });
+      await batch.commit();
+      showNotification(`Successfully deleted ${selectedEmpIds.length} employees.`);
+      setSelectedEmpIds([]);
+    } catch (error) {
+      console.error("Error bulk deleting:", error);
+      showNotification("Failed to delete employees.", "error");
+    }
+  };
+
   const toggleEmployee = (id) => {
     setSelectedEmpIds(prev => prev.includes(id) ? prev.filter(empId => empId !== id) : [...prev, id]);
   };
@@ -1638,9 +1668,14 @@ function EmployeeManagementView({ employees, shifts, showNotification, onEmploye
         </div>
         <div className="flex gap-2">
           {selectedEmpIds.length > 0 && (
-            <button onClick={() => setIsBulkEditOpen(true)} className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm transition-colors">
-              <Edit size={18} /> Bulk Edit ({selectedEmpIds.length})
-            </button>
+            <>
+              <button onClick={() => setIsBulkEditOpen(true)} className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm transition-colors">
+                <Edit size={18} /> Bulk Edit ({selectedEmpIds.length})
+              </button>
+              <button onClick={handleBulkDelete} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm transition-colors">
+                <Trash2 size={18} /> Bulk Delete ({selectedEmpIds.length})
+              </button>
+            </>
           )}
           <button onClick={exportToCSV} className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm transition-colors">
             <Download size={18} /> Export
@@ -1863,7 +1898,10 @@ function EmployeeManagementView({ employees, shifts, showNotification, onEmploye
                     </span>
                   </td>
                   <td className="p-4 text-right">
-                    <button onClick={() => openForm(emp)} className="text-blue-500 hover:text-blue-700 transition-colors"><Edit size={16}/></button>
+                    <div className="flex justify-end gap-2">
+                      <button onClick={() => openForm(emp)} className="text-blue-500 hover:text-blue-700 transition-colors"><Edit size={16}/></button>
+                      <button onClick={() => handleDeleteEmployee(emp.id)} className="text-red-500 hover:text-red-700 transition-colors"><Trash2 size={16}/></button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -2039,7 +2077,7 @@ function SettingsView({ appUsers, showNotification, currentUid }) {
 // ==========================================
 // 6. EMPLOYEE PROFILE VIEW
 // ==========================================
-function EmployeeProfileView({ employeeId, employees, attendances, appUsers, shifts, onBack, showNotification }) {
+function EmployeeProfileView({ employeeId, employees, attendances, appUsers, shifts, onBack, showNotification, currentUserRole }) {
   const employee = employees.find(e => e.empId === employeeId);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = React.useRef(null);
@@ -2091,7 +2129,7 @@ function EmployeeProfileView({ employeeId, employees, attendances, appUsers, shi
       await uploadBytes(storageRef, file);
       const photoUrl = await getDownloadURL(storageRef);
       
-      await updateDoc(doc(db, 'employees', employee.id), {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'employees', employee.id), {
         photoUrl
       });
       showNotification('Profile photo updated successfully!', 'success');
@@ -2128,21 +2166,25 @@ function EmployeeProfileView({ employeeId, employees, attendances, appUsers, shi
                   employee.name.charAt(0).toUpperCase()
                 )}
               </div>
-              <button 
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isUploading}
-                className="absolute inset-0 bg-black bg-opacity-50 text-white flex items-center justify-center rounded-full opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50"
-                title="Upload Photo"
-              >
-                {isUploading ? <span className="animate-spin text-xs">...</span> : <UploadCloud size={16} />}
-              </button>
-              <input 
-                type="file" 
-                ref={fileInputRef} 
-                onChange={handlePhotoUpload} 
-                accept="image/*" 
-                className="hidden" 
-              />
+              {['Admin', 'Super Admin'].includes(currentUserRole) && (
+                <>
+                  <button 
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploading}
+                    className="absolute inset-0 bg-black bg-opacity-50 text-white flex items-center justify-center rounded-full opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50"
+                    title="Upload Photo"
+                  >
+                    {isUploading ? <span className="animate-spin text-xs">...</span> : <UploadCloud size={16} />}
+                  </button>
+                  <input 
+                    type="file" 
+                    ref={fileInputRef} 
+                    onChange={handlePhotoUpload} 
+                    accept="image/*" 
+                    className="hidden" 
+                  />
+                </>
+              )}
             </div>
             <div>
               <h2 className="text-2xl font-bold text-slate-800">{employee.name}</h2>
@@ -2410,7 +2452,8 @@ function LeaveRequestsView({ leaveRequests, employees, attendances, currentUserR
         reason: form.reason,
         status: 'Pending',
         submittedAt: new Date().toISOString(),
-        submittedBy: user.uid
+        submittedBy: user.uid,
+        submittedByEmail: user.email || 'Unknown'
       };
 
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'leave_requests'), leaveReqData);
@@ -2635,6 +2678,7 @@ function LeaveRequestsView({ leaveRequests, employees, attendances, currentUserR
                 <th className="p-4 font-medium">Leave Type</th>
                 <th className="p-4 font-medium">Duration</th>
                 <th className="p-4 font-medium">Reason</th>
+                <th className="p-4 font-medium">Submitted By</th>
                 <th className="p-4 font-medium">Status</th>
                 <th className="p-4 font-medium text-right">Actions</th>
               </tr>
@@ -2657,6 +2701,9 @@ function LeaveRequestsView({ leaveRequests, employees, attendances, currentUserR
                   </td>
                   <td className="p-4 max-w-xs">
                     <p className="text-sm text-slate-600 truncate" title={req.reason}>{req.reason}</p>
+                  </td>
+                  <td className="p-4">
+                    <div className="text-xs text-slate-500">{req.submittedByEmail || 'N/A'}</div>
                   </td>
                   <td className="p-4">
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getStatusColor(req.status)}`}>
@@ -2686,7 +2733,7 @@ function LeaveRequestsView({ leaveRequests, employees, attendances, currentUserR
               ))}
               {visibleRequests.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="p-8 text-center text-slate-500 italic">
+                  <td colSpan={7} className="p-8 text-center text-slate-500 italic">
                     No leave requests found.
                   </td>
                 </tr>
