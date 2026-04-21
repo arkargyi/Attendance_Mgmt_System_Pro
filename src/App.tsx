@@ -1603,6 +1603,18 @@ function EmployeeManagementView({ employees, shifts, showNotification, onEmploye
     document.body.removeChild(link);
   };
 
+  const downloadTemplate = () => {
+    const templateContent = "Emp_ID,Name,Department,Status,ResignDate,Shift_ID\nE001,Aung Aung,Management,Active,,ShiftA\nE002,Su Su,HR,Active,,ShiftA";
+    const blob = new Blob([templateContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', 'employee_upload_template.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -1677,6 +1689,9 @@ function EmployeeManagementView({ employees, shifts, showNotification, onEmploye
               </button>
             </>
           )}
+          <button onClick={downloadTemplate} className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm transition-colors" title="Download CSV Template">
+            <FileText size={18} /> Template
+          </button>
           <button onClick={exportToCSV} className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm transition-colors">
             <Download size={18} /> Export
           </button>
