@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useLanguage } from './LanguageContext';
 import { 
   Users, CalendarCheck, BarChart3, History, Settings, LogOut, 
   UploadCloud, Download, Trash2, Edit, AlertTriangle, CheckSquare, 
@@ -80,6 +81,7 @@ const getMyanmarDateString = () => {
 };
 
 export default function App() {
+  const { t, lang, setLang } = useLanguage();
   const [user, setUser] = useState(null);
   const [currentUserRole, setCurrentUserRole] = useState(null);
   const [currentView, setCurrentView] = useState('dashboard');
@@ -272,24 +274,24 @@ export default function App() {
           <h1 className="text-3xl font-bold text-slate-800 mb-2 text-center">Attendance Pro</h1>
           <p className="text-slate-500 mb-6 text-center">Architect Edition ERP (RBAC)</p>
           
-          <form onSubmit={handleEmailAuth} className="space-y-4 mb-6">
+            <form onSubmit={handleEmailAuth} className="space-y-4 mb-6">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">{t('email')}</label>
               <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-blue-500" placeholder="admin@erp.com" />
             </div>
             <div>
               <div className="flex justify-between items-center mb-1">
-                <label className="block text-sm font-medium text-slate-700">Password</label>
+                <label className="block text-sm font-medium text-slate-700">{t('password')}</label>
                 {authMode === 'login' && (
                   <button type="button" onClick={handlePasswordReset} className="text-xs text-blue-600 hover:underline">
-                    Forgot Password?
+                    {t('forgot_password')}
                   </button>
                 )}
               </div>
               <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-blue-500" placeholder="••••••••" />
             </div>
             <button type="submit" className="w-full bg-slate-800 hover:bg-slate-900 text-white py-3 px-4 rounded-lg font-medium transition-colors">
-              {authMode === 'login' ? 'Sign In' : 'Create Account'}
+              {authMode === 'login' ? t('sign_in') : t('sign_up')}
             </button>
           </form>
 
@@ -305,7 +307,7 @@ export default function App() {
 
           <p className="text-center text-sm text-slate-500">
             <button onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')} className="text-blue-600 font-medium hover:underline">
-              {authMode === 'login' ? 'Switch to Sign Up' : 'Switch to Log In'}
+              {authMode === 'login' ? 'Switch to Sign Up' : t('back_to_login')}
             </button>
           </p>
         </motion.div>
@@ -332,17 +334,17 @@ export default function App() {
         </div>
         <nav className="flex-1 px-4 py-6 space-y-2">
           {/* Normal, Admin, Super Admin */}
-          <SidebarItem icon={<BarChart3 />} label="Dashboard" active={currentView === 'dashboard'} onClick={() => setCurrentView('dashboard')} />
-          <SidebarItem icon={<CheckSquare />} label="Submit form" active={currentView === 'submit'} onClick={() => setCurrentView('submit')} />
-          <SidebarItem icon={<Calendar />} label="Leave Requests" active={currentView === 'leaveRequests'} onClick={() => setCurrentView('leaveRequests')} />
+          <SidebarItem icon={<BarChart3 />} label={t('dashboard')} active={currentView === 'dashboard'} onClick={() => setCurrentView('dashboard')} />
+          <SidebarItem icon={<CheckSquare />} label={t('submit_attendance')} active={currentView === 'submit'} onClick={() => setCurrentView('submit')} />
+          <SidebarItem icon={<Calendar />} label={t('leave_requests')} active={currentView === 'leaveRequests'} onClick={() => setCurrentView('leaveRequests')} />
           
           {/* Admin, Super Admin */}
           {['Admin', 'Super Admin'].includes(currentUserRole) && (
             <>
-              <SidebarItem icon={<History />} label="Records History" active={currentView === 'history'} onClick={() => setCurrentView('history')} />
-              <SidebarItem icon={<FileText />} label="Reports" active={currentView === 'reports'} onClick={() => setCurrentView('reports')} />
-              <SidebarItem icon={<Users />} label="Employee List" active={currentView === 'employees'} onClick={() => setCurrentView('employees')} />
-              <SidebarItem icon={<Clock />} label="Shifts" active={currentView === 'shifts'} onClick={() => setCurrentView('shifts')} />
+              <SidebarItem icon={<History />} label={t('history')} active={currentView === 'history'} onClick={() => setCurrentView('history')} />
+              <SidebarItem icon={<FileText />} label={t('reports')} active={currentView === 'reports'} onClick={() => setCurrentView('reports')} />
+              <SidebarItem icon={<Users />} label={t('employee_list')} active={currentView === 'employees'} onClick={() => setCurrentView('employees')} />
+              <SidebarItem icon={<Clock />} label={t('shifts')} active={currentView === 'shifts'} onClick={() => setCurrentView('shifts')} />
             </>
           )}
 
@@ -350,7 +352,7 @@ export default function App() {
           {currentUserRole === 'Super Admin' && (
             <div className="pt-4 mt-4 border-t border-slate-800">
               <p className="text-xs text-slate-500 font-bold uppercase mb-2 ml-4">System Settings</p>
-              <SidebarItem icon={<Settings />} label="User Management" active={currentView === 'settings'} onClick={() => setCurrentView('settings')} />
+              <SidebarItem icon={<Settings />} label={t('settings')} active={currentView === 'settings'} onClick={() => setCurrentView('settings')} />
             </div>
           )}
         </nav>
@@ -372,6 +374,16 @@ export default function App() {
               </div>
             </div>
             <button onClick={() => signOut(auth)} className="text-slate-400 hover:text-red-400 p-2"><LogOut size={18} /></button>
+          </div>
+          
+          <div className="mt-4 flex flex-col gap-2">
+            <button 
+              onClick={() => setLang(lang === 'en' ? 'my' : 'en')} 
+              className="flex items-center justify-between text-slate-400 hover:text-white hover:bg-slate-800 px-3 py-2 rounded-lg transition-colors w-full"
+            >
+              <span className="text-sm font-medium">{lang === 'en' ? 'မြန်မာစာ' : 'English'}</span>
+              <span className="text-xs border border-slate-600 px-1.5 py-0.5 rounded bg-slate-800">{lang.toUpperCase()}</span>
+            </button>
           </div>
         </div>
       </aside>
@@ -449,6 +461,7 @@ const SidebarItem = ({ icon, label, active, onClick }) => (
 // 1. DASHBOARD VIEW
 // ==========================================
 function DashboardView({ employees, attendances }) {
+  const { t } = useLanguage();
   const [selectedDate, setSelectedDate] = useState(getMyanmarDateString());
   const [detailStatus, setDetailStatus] = useState(null);
 
@@ -786,6 +799,7 @@ const StatCard = ({ title, value, color, onClick, isActive }: { title: string, v
 // 2. SUBMIT ATTENDANCE VIEW
 // ==========================================
 function SubmitAttendanceView({ employees, attendances, showNotification, user }) {
+  const { t } = useLanguage();
   const [date, setDate] = useState(getMyanmarDateString());
   const [departmentId, setDepartmentId] = useState('');
   const [status, setStatus] = useState('Present');
@@ -951,6 +965,7 @@ function SubmitAttendanceView({ employees, attendances, showNotification, user }
 // 3. HISTORY VIEW
 // ==========================================
 function HistoryView({ attendances, employees, showNotification, onEmployeeClick }) {
+  const { t } = useLanguage();
   const today = getMyanmarDateString();
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
@@ -1225,6 +1240,7 @@ function HistoryView({ attendances, employees, showNotification, onEmployeeClick
 // 4. REPORTS VIEW
 // ==========================================
 function ReportsView({ attendances, employees, showNotification }) {
+  const { t } = useLanguage();
   const today = getMyanmarDateString();
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
@@ -1393,6 +1409,7 @@ function ReportsView({ attendances, employees, showNotification }) {
 // 5. EMPLOYEE MANAGEMENT VIEW
 // ==========================================
 function EmployeeManagementView({ employees, shifts, showNotification, onEmployeeClick }) {
+  const { t } = useLanguage();
   const [searchTerm, setSearchTerm] = useState('');
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -1481,10 +1498,14 @@ function EmployeeManagementView({ employees, shifts, showNotification, onEmploye
   const handleSave = async (e) => {
     e.preventDefault();
     try {
+      const isDuplicate = employees.some(emp => emp.empId === form.empId && emp.id !== editingId);
+      if (isDuplicate) {
+        return showNotification("Employee ID already exists!", 'error');
+      }
+
       if (editingId) {
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'employees', editingId), form);
       } else {
-        if (employees.some(emp => emp.empId === form.empId)) return showNotification("Employee ID already exists!", 'error');
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'employees'), form);
       }
       setIsFormOpen(false);
@@ -1933,6 +1954,7 @@ function EmployeeManagementView({ employees, shifts, showNotification, onEmploye
 // 5. SETTINGS VIEW (User Role Management - Super Admin Only)
 // ==========================================
 function SettingsView({ appUsers, showNotification, currentUid }) {
+  const { t } = useLanguage();
   const [confirmAction, setConfirmAction] = useState(null);
   
   const handleRoleChange = async (userId, newRole) => {
@@ -2093,6 +2115,7 @@ function SettingsView({ appUsers, showNotification, currentUid }) {
 // 6. EMPLOYEE PROFILE VIEW
 // ==========================================
 function EmployeeProfileView({ employeeId, employees, attendances, appUsers, shifts, onBack, showNotification, currentUserRole }) {
+  const { t } = useLanguage();
   const employee = employees.find(e => e.empId === employeeId);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = React.useRef(null);
@@ -2315,6 +2338,7 @@ function EmployeeProfileView({ employeeId, employees, attendances, appUsers, shi
 // 7. SHIFTS VIEW
 // ==========================================
 function ShiftsView({ shifts, showNotification }) {
+  const { t } = useLanguage();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState({ name: '', startTime: '', endTime: '', description: '' });
@@ -2439,6 +2463,7 @@ function ShiftsView({ shifts, showNotification }) {
 // 9. LEAVE REQUESTS VIEW
 // ==========================================
 function LeaveRequestsView({ leaveRequests, employees, attendances, currentUserRole, user, showNotification }) {
+  const { t } = useLanguage();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [departmentId, setDepartmentId] = useState('');
   const [form, setForm] = useState({ empId: '', leaveType: 'Sick', startDate: getMyanmarDateString(), endDate: getMyanmarDateString(), reason: '' });
