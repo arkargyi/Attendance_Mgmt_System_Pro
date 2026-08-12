@@ -4,7 +4,7 @@ import {
   Users, CalendarCheck, BarChart3, History, Settings, LogOut, 
   UploadCloud, Download, Trash2, Edit, AlertTriangle, CheckSquare, 
   Square, Search, Plus, ChevronUp, ChevronDown, ShieldAlert, Key,
-  Filter, X, Clock, Sparkles, FileText, LineChart, Calendar
+  Filter, X, Clock, Sparkles, FileText, LineChart, Calendar, AlertCircle
 } from 'lucide-react';
 import Fuse from 'fuse.js';
 import { GoogleGenAI } from '@google/genai';
@@ -80,6 +80,72 @@ const getMyanmarDateString = () => {
   return `${year}-${month}-${day}`;
 };
 
+let cachedAccessToken = null;
+
+const getOrCreateMonthSheet = async (spreadsheetId, dateString) => {
+  if (!cachedAccessToken) return null;
+  const dateObj = new Date(dateString);
+  const monthName = dateObj.toLocaleString('default', { month: 'long', year: 'numeric' }); 
+  
+  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`, {
+    headers: { Authorization: `Bearer ${cachedAccessToken}` }
+  });
+  if (!res.ok) throw new Error("Failed to get spreadsheet info. Access Token might be expired or invalid.");
+  const data = await res.json();
+  const sheets = data.sheets;
+  
+  let sheet = sheets.find(s => s.properties.title === monthName);
+  
+  if (!sheet) {
+    const addRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${cachedAccessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        requests: [{
+          addSheet: {
+            properties: { title: monthName }
+          }
+        }]
+      })
+    });
+    if (!addRes.ok) throw new Error("Failed to create new month sheet");
+    
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(monthName)}!A1:F1:append?valueInputOption=USER_ENTERED`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${cachedAccessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        values: [["Date", "Emp ID", "Name", "Department", "Status", "Submitted By"]]
+      })
+    });
+  }
+  
+  return monthName;
+};
+
+const appendAttendanceToSheet = async (spreadsheetId, monthName, rows) => {
+  if (!cachedAccessToken) return;
+  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(monthName)}!A:F:append?valueInputOption=USER_ENTERED`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${cachedAccessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      values: rows
+    })
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error?.message || "Failed to append data to Google Sheet");
+  }
+};
+
 export default function App() {
   const { t, lang, setLang } = useLanguage();
   const [user, setUser] = useState(null);
@@ -93,6 +159,8 @@ export default function App() {
   const [appUsers, setAppUsers] = useState([]);
   const [shifts, setShifts] = useState([]);
   const [leaveRequests, setLeaveRequests] = useState([]);
+  const [appSettings, setAppSettings] = useState(null);
+  const [hasSheetToken, setHasSheetToken] = useState(false);
   
   const [loading, setLoading] = useState(true);
   const [notification, setNotification] = useState(null);
@@ -133,6 +201,7 @@ export default function App() {
     const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'app_users'); // Global users list
     const shiftsRef = collection(db, 'artifacts', appId, 'public', 'data', 'shifts');
     const leaveRequestsRef = collection(db, 'artifacts', appId, 'public', 'data', 'leave_requests');
+    const settingsRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_settings', 'main_config');
 
     const handleFirebaseError = (error) => {
       if (error.code === 'permission-denied') {
@@ -178,7 +247,15 @@ export default function App() {
       setLeaveRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     }, handleFirebaseError);
 
-    return () => { unsubEmp(); unsubAtt(); unsubUsers(); unsubShifts(); unsubLeaveReqs(); };
+    const unsubSettings = onSnapshot(settingsRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setAppSettings(docSnap.data());
+      } else {
+        setAppSettings({});
+      }
+    }, handleFirebaseError);
+
+    return () => { unsubEmp(); unsubAtt(); unsubUsers(); unsubShifts(); unsubLeaveReqs(); unsubSettings(); };
   }, [user]);
 
   const handleEmailAuth = async (e) => {
@@ -228,16 +305,42 @@ export default function App() {
 
   const loginWithGoogle = async () => {
     if (window !== window.top) {
-      showNotification("Google Login ကို Preview (Iframe) တွင် သုံး၍မရပါ။ Email/Password ကိုသာ အသုံးပြုပါ။", 'error');
+      showNotification("Google Login ကို Preview (Iframe) တွင် သုံး၍မရပါ။ အသစ် tab ဖြင့် ဖွင့်ပြီးမှ သုံးပေးပါ။", 'error');
       return;
     }
     const provider = new GoogleAuthProvider();
+    provider.addScope('https://www.googleapis.com/auth/spreadsheets');
     try {
-      await signInWithPopup(auth, provider);
+      const result = await signInWithPopup(auth, provider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (credential?.accessToken) {
+        cachedAccessToken = credential.accessToken;
+        setHasSheetToken(true);
+      }
       // Logic for new Google users is handled in the onSnapshot above (Self-heal)
       showNotification("Google Login Successful!");
     } catch (error) {
       showNotification("Google Login Failed: " + error.message, 'error');
+    }
+  };
+
+  const connectGoogleSheets = async () => {
+    if (window !== window.top) {
+      showNotification("Google Login ကို Preview (Iframe) တွင် သုံး၍မရပါ။ အသစ် tab ဖြင့် ဖွင့်ပြီးမှ သုံးပေးပါ။", 'error');
+      return;
+    }
+    const provider = new GoogleAuthProvider();
+    provider.addScope('https://www.googleapis.com/auth/spreadsheets');
+    try {
+      const result = await signInWithPopup(auth, provider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (credential?.accessToken) {
+        cachedAccessToken = credential.accessToken;
+        setHasSheetToken(true);
+        showNotification("Google Sheets linked successfully!");
+      }
+    } catch (error) {
+      showNotification("Google Link Failed: " + error.message, 'error');
     }
   };
 
@@ -428,8 +531,9 @@ export default function App() {
                 transition={{ duration: 0.2 }}
                 className="h-full"
               >
-                {currentView === 'dashboard' && <DashboardView employees={employees} attendances={attendances} />}
-                {currentView === 'submit' && <SubmitAttendanceView employees={employees} attendances={attendances} showNotification={showNotification} user={user} />}
+                {currentView === 'dashboard' && currentUserRole === 'Normal' && <NormalUserDashboardView employees={employees} attendances={attendances} leaveRequests={leaveRequests} user={user} />}
+                {currentView === 'dashboard' && ['Admin', 'Super Admin'].includes(currentUserRole) && <DashboardView employees={employees} attendances={attendances} />}
+                {currentView === 'submit' && <SubmitAttendanceView employees={employees} attendances={attendances} showNotification={showNotification} user={user} appSettings={appSettings} hasSheetToken={hasSheetToken} connectGoogleSheets={connectGoogleSheets} />}
                 {currentView === 'leaveRequests' && <LeaveRequestsView leaveRequests={leaveRequests} employees={employees} attendances={attendances} currentUserRole={currentUserRole} user={user} showNotification={showNotification} />}
                 
                 {/* Protected Routes Handling */}
@@ -456,6 +560,150 @@ const SidebarItem = ({ icon, label, active, onClick }) => (
   </button>
 );
 
+
+// ==========================================
+// normal. USER DASHBOARD VIEW
+// ==========================================
+function NormalUserDashboardView({ employees, attendances, leaveRequests, user }) {
+  const { t } = useLanguage();
+  
+  const myEmployeeRecord = useMemo(() => {
+    return employees.find(emp => emp.email === user.email);
+  }, [employees, user.email]);
+
+  const myAttendances = useMemo(() => {
+    if (!myEmployeeRecord) return [];
+    return attendances.filter(a => a.empId === myEmployeeRecord.empId).sort((a, b) => b.date.localeCompare(a.date));
+  }, [attendances, myEmployeeRecord]);
+
+  const myLeaveRequests = useMemo(() => {
+    return leaveRequests.filter(req => req.submittedByEmail === user.email || req.empId === myEmployeeRecord?.empId).sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+  }, [leaveRequests, user.email, myEmployeeRecord]);
+
+  const getStatusColor = (status) => {
+    switch(status) {
+      case 'Present': return 'bg-green-100 text-green-700';
+      case 'Leave': return 'bg-yellow-100 text-yellow-700';
+      case 'Absent': return 'bg-red-100 text-red-700';
+      case 'Late': return 'bg-orange-100 text-orange-700';
+      case 'Half-Day': return 'bg-purple-100 text-purple-700';
+      default: return 'bg-slate-100 text-slate-700';
+    }
+  };
+
+  const getReqStatusColor = (status) => {
+    switch(status) {
+      case 'Pending': return 'bg-blue-100 text-blue-800 border-blue-200';
+      case 'Approved': return 'bg-green-100 text-green-800 border-green-200';
+      case 'Rejected': return 'bg-red-100 text-red-800 border-red-200';
+      default: return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+    }
+  };
+
+  if (!myEmployeeRecord) {
+    return (
+      <div className="flex flex-col flex-1 h-full max-w-7xl mx-auto p-4 lg:p-6 pb-24 items-center justify-center animate-fadeIn">
+        <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 max-w-md text-center">
+          <div className="w-16 h-16 bg-yellow-100 text-yellow-600 rounded-full flex items-center justify-center mx-auto mb-4">
+            <AlertCircle size={32} />
+          </div>
+          <h2 className="text-xl font-bold text-slate-800 mb-2">Profile Not Linked</h2>
+          <p className="text-slate-500 mb-4">Your current Google/Email account ({user.email}) is not linked to any Employee Profile in the ERP system.</p>
+          <p className="text-sm text-slate-400 bg-slate-50 p-4 rounded-lg text-left">
+            Please ask your IT Admin or HR Manager to edit your Employee profile and set the Email field to <b>{user.email}</b>.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col flex-1 max-w-7xl mx-auto p-4 lg:p-6 pb-24 space-y-6 animate-fadeIn">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-3xl font-bold text-slate-800 tracking-tight">My Dashboard</h2>
+          <p className="text-slate-500 mt-1">Welcome back, {myEmployeeRecord.name}</p>
+        </div>
+        <div className="bg-white border border-slate-200 shadow-sm px-4 py-2 rounded-xl flex items-center gap-3">
+          <div className="flex flex-col items-end">
+            <span className="text-xs font-semibold text-slate-400 uppercase tracking-widest">{getDeptName(myEmployeeRecord.departmentId)}</span>
+            <span className="text-sm font-medium text-slate-800">{myEmployeeRecord.empId}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        
+        {/* Attendance History */}
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col max-h-[500px]">
+          <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+            <h3 className="font-semibold text-slate-800 flex items-center gap-2"><Calendar size={18} className="text-blue-500"/> Attendance History</h3>
+          </div>
+          <div className="overflow-y-auto p-2 flex-col gap-2 flex-grow">
+            {myAttendances.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-slate-400">
+                <Calendar size={32} className="mb-2 opacity-50"/>
+                <p>No attendance records found.</p>
+              </div>
+            ) : (
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="text-xs text-slate-400 uppercase tracking-wider border-b border-slate-100">
+                    <th className="p-3 font-medium">Date</th>
+                    <th className="p-3 font-medium">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {myAttendances.slice(0, 30).map(att => (
+                    <tr key={att.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="p-3 text-sm font-medium text-slate-700">{att.date}</td>
+                      <td className="p-3 text-sm">
+                        <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(att.status)}`}>
+                          {att.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+
+        {/* Leave Requests Status */}
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col max-h-[500px]">
+          <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+            <h3 className="font-semibold text-slate-800 flex items-center gap-2"><FileText size={18} className="text-purple-500"/> Leave Requests Status</h3>
+          </div>
+          <div className="overflow-y-auto p-4 flex-col gap-3 flex-grow">
+            {myLeaveRequests.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-slate-400">
+                <FileText size={32} className="mb-2 opacity-50"/>
+                <p>No leave requests found.</p>
+              </div>
+            ) : (
+              myLeaveRequests.map(req => (
+                <div key={req.id} className="border border-slate-100 rounded-xl p-4 flex items-start justify-between bg-slate-50/30 hover:bg-slate-50 transition-colors">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <h4 className="font-semibold text-slate-800">{req.leaveType} Leave</h4>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide border ${getReqStatusColor(req.status)}`}>
+                        {req.status}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mb-2">{req.startDate} to {req.endDate}</p>
+                    <p className="text-sm text-slate-600 line-clamp-2">{req.reason}</p>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+}
 
 // ==========================================
 // 1. DASHBOARD VIEW
@@ -798,7 +1046,7 @@ const StatCard = ({ title, value, color, onClick, isActive }: { title: string, v
 // ==========================================
 // 2. SUBMIT ATTENDANCE VIEW
 // ==========================================
-function SubmitAttendanceView({ employees, attendances, showNotification, user }) {
+function SubmitAttendanceView({ employees, attendances, showNotification, user, appSettings, hasSheetToken, connectGoogleSheets }) {
   const { t } = useLanguage();
   const [date, setDate] = useState(getMyanmarDateString());
   const [departmentId, setDepartmentId] = useState('');
@@ -869,6 +1117,57 @@ function SubmitAttendanceView({ employees, attendances, showNotification, user }
       });
 
       await batch.commit();
+      
+      // Auto-save to Google Sheets
+      if (cachedAccessToken) {
+        try {
+          // If no spreadsheetId is set, create a new one
+          let spreadsheetId = appSettings?.spreadsheetId;
+          if (!spreadsheetId) {
+            const createRes = await fetch("https://sheets.googleapis.com/v4/spreadsheets", {
+               method: "POST",
+               headers: {
+                 'Authorization': `Bearer ${cachedAccessToken}`,
+                 'Content-Type': 'application/json'
+               },
+               body: JSON.stringify({
+                 properties: { title: "Attendance Pro - Records" }
+               })
+            });
+            if (createRes.ok) {
+              const createData = await createRes.json();
+              spreadsheetId = createData.spreadsheetId;
+              // Save to Firestore
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'app_settings', 'main_config'), {
+                spreadsheetId
+              }, { merge: true });
+            }
+          }
+          
+          if (spreadsheetId) {
+             const monthName = await getOrCreateMonthSheet(spreadsheetId, date);
+             const rows = validEmpIds.map(empId => {
+               const emp = employees.find(e => e.empId === empId);
+               return [
+                 date,
+                 emp?.empId || empId,
+                 emp?.name || "",
+                 getDeptName(departmentId),
+                 status,
+                 user?.email || 'Unknown'
+               ];
+             });
+             
+             await appendAttendanceToSheet(spreadsheetId, monthName, rows);
+          }
+        } catch (sheetErr) {
+          console.error("Google Sheets Sync Error:", sheetErr);
+          showNotification("Saved to Database, but Google Sheets auto-save failed. " + sheetErr.message, "error");
+        }
+      } else {
+        console.warn("No Google OAuth Token available to sync with Google Sheets. Please login with Google.");
+      }
+
       if (!navigator.onLine) {
         showNotification(`Offline Mode: ဝန်ထမ်း (${validEmpIds.length}) ဦးအတွက် Attendance ကို Local တွင် သိမ်းဆည်းထားပါသည်။ အင်တာနက်ရရှိချိန်တွင် အလိုအလျောက် Sync လုပ်ပါမည်။`);
       } else {
@@ -888,9 +1187,16 @@ function SubmitAttendanceView({ employees, attendances, showNotification, user }
 
   return (
     <div className="max-w-4xl mx-auto animate-fadeIn">
-      <header className="mb-6">
-        <h2 className="text-2xl font-bold text-slate-800">Submit Attendance</h2>
-        <p className="text-slate-500">Duplicate Entry Check ပါဝင်သည်။ တစ်ရက်လျှင် တစ်ကြိမ်သာ တင်ခွင့်ရှိသည်။</p>
+      <header className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-800">Submit Attendance</h2>
+          <p className="text-slate-500">Duplicate Entry Check ပါဝင်သည်။ တစ်ရက်လျှင် တစ်ကြိမ်သာ တင်ခွင့်ရှိသည်။</p>
+        </div>
+        {!hasSheetToken && (
+          <button onClick={connectGoogleSheets} className="flex items-center gap-2 bg-green-50 text-green-700 hover:bg-green-100 px-4 py-2 rounded-lg border border-green-200 text-sm font-medium transition-colors whitespace-nowrap">
+            <UploadCloud size={16} /> Link Google Sheets for Auto-Save
+          </button>
+        )}
       </header>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -1413,7 +1719,7 @@ function EmployeeManagementView({ employees, shifts, showNotification, onEmploye
   const [searchTerm, setSearchTerm] = useState('');
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const [form, setForm] = useState({ empId: '', name: '', departmentId: MASTER_DEPARTMENTS[0].id, status: 'Active', resignDate: '', shiftId: '' });
+  const [form, setForm] = useState({ empId: '', name: '', email: '', departmentId: MASTER_DEPARTMENTS[0].id, status: 'Active', resignDate: '', shiftId: '' });
   const [aiInsight, setAiInsight] = useState('');
   const [isGeneratingInsight, setIsGeneratingInsight] = useState(false);
   const [selectedEmpIds, setSelectedEmpIds] = useState([]);
@@ -1487,10 +1793,10 @@ function EmployeeManagementView({ employees, shifts, showNotification, onEmploye
     if (emp) {
       setEditingId(emp.id);
       const currentDeptId = emp.departmentId || getDeptId(emp.department);
-      setForm({ empId: emp.empId, name: emp.name, departmentId: currentDeptId, status: emp.status, resignDate: emp.resignDate || '', shiftId: emp.shiftId || '' });
+      setForm({ empId: emp.empId, name: emp.name, email: emp.email || '', departmentId: currentDeptId, status: emp.status, resignDate: emp.resignDate || '', shiftId: emp.shiftId || '' });
     } else {
       setEditingId(null);
-      setForm({ empId: '', name: '', departmentId: MASTER_DEPARTMENTS[0].id, status: 'Active', resignDate: '', shiftId: '' });
+      setForm({ empId: '', name: '', email: '', departmentId: MASTER_DEPARTMENTS[0].id, status: 'Active', resignDate: '', shiftId: '' });
     }
     setIsFormOpen(true);
   };
@@ -1748,6 +2054,7 @@ function EmployeeManagementView({ employees, shifts, showNotification, onEmploye
               <form onSubmit={handleSave} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div><label className="block text-xs font-medium text-slate-600 mb-1">Emp ID</label><input required value={form.empId} onChange={e => setForm({...form, empId: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500" /></div>
                 <div><label className="block text-xs font-medium text-slate-600 mb-1">Name</label><input required value={form.name} onChange={e => setForm({...form, name: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500" /></div>
+                <div><label className="block text-xs font-medium text-slate-600 mb-1">Email <span className="text-slate-400 font-normal">(for System Access)</span></label><input type="email" value={form.email} onChange={e => setForm({...form, email: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500" placeholder="user@erp.com" /></div>
                 <div>
                   <label className="block text-xs font-medium text-slate-600 mb-1">Department</label>
                   <select required value={form.departmentId} onChange={e => setForm({...form, departmentId: e.target.value})} className="w-full border rounded p-2 outline-none focus:ring-1 focus:ring-blue-500">
