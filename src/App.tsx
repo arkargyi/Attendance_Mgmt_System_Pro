@@ -4,7 +4,8 @@ import {
   Users, CalendarCheck, BarChart3, History, Settings, LogOut, 
   UploadCloud, Download, Trash2, Edit, AlertTriangle, CheckSquare, 
   Square, Search, Plus, ChevronUp, ChevronDown, ShieldAlert, Key,
-  Filter, X, Clock, Sparkles, FileText, LineChart, Calendar, AlertCircle
+  Filter, X, Clock, Sparkles, FileText, LineChart, Calendar, AlertCircle,
+  Target, TrendingUp, TrendingDown, Award, CheckCircle2, Flame, Sliders, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import Fuse from 'fuse.js';
 import { GoogleGenAI } from '@google/genai';
@@ -562,7 +563,170 @@ const SidebarItem = ({ icon, label, active, onClick }) => (
 
 
 // ==========================================
-// normal. USER DASHBOARD VIEW
+// ATTENDANCE GAUGE CHART
+// ==========================================
+function AttendanceGaugeChart({ 
+  rate, 
+  targetPercentage, 
+  size = 220 
+}: { 
+  rate: number; 
+  targetPercentage: number; 
+  size?: number; 
+}) {
+  const clampedRate = Math.min(100, Math.max(0, rate));
+  const clampedTarget = Math.min(100, Math.max(0, targetPercentage));
+  
+  // Dimensions for semi-circle
+  const cx = 110;
+  const cy = 100;
+  const r = 74;
+  const strokeWidth = 14;
+
+  // Arc length for semi-circle (PI * r)
+  const arcLength = Math.PI * r;
+  const strokeDashoffset = arcLength * (1 - clampedRate / 100);
+
+  // Target indicator tick on arc (180 deg = 0%, 0 deg = 100%)
+  const targetAngleDeg = 180 - (clampedTarget / 100) * 180;
+  const targetAngleRad = (targetAngleDeg * Math.PI) / 180;
+  const tInnerX = cx + (r - strokeWidth / 2 - 2) * Math.cos(targetAngleRad);
+  const tInnerY = cy - (r - strokeWidth / 2 - 2) * Math.sin(targetAngleRad);
+  const tOuterX = cx + (r + strokeWidth / 2 + 7) * Math.cos(targetAngleRad);
+  const tOuterY = cy - (r + strokeWidth / 2 + 7) * Math.sin(targetAngleRad);
+
+  // Needle angle for current rate
+  const needleAngleDeg = 180 - (clampedRate / 100) * 180;
+  const needleAngleRad = (needleAngleDeg * Math.PI) / 180;
+  const needleLength = r - 12;
+  const tipX = cx + needleLength * Math.cos(needleAngleRad);
+  const tipY = cy - needleLength * Math.sin(needleAngleRad);
+  
+  // Base triangle points perpendicular to needle direction
+  const baseAngle1 = needleAngleRad + Math.PI / 2;
+  const baseAngle2 = needleAngleRad - Math.PI / 2;
+  const baseRadius = 4.5;
+  const b1X = cx + baseRadius * Math.cos(baseAngle1);
+  const b1Y = cy - baseRadius * Math.sin(baseAngle1);
+  const b2X = cx + baseRadius * Math.cos(baseAngle2);
+  const b2Y = cy - baseRadius * Math.sin(baseAngle2);
+
+  // Dynamic colors based on rate vs target
+  let gradientId = 'gauge-emerald';
+  let statusBadgeColor = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+  let statusText = 'Goal Met';
+
+  if (clampedRate < clampedTarget - 10) {
+    gradientId = 'gauge-rose';
+    statusBadgeColor = 'bg-rose-50 text-rose-700 border-rose-200';
+    statusText = 'Behind Target';
+  } else if (clampedRate < clampedTarget) {
+    gradientId = 'gauge-amber';
+    statusBadgeColor = 'bg-amber-50 text-amber-700 border-amber-200';
+    statusText = 'Near Goal';
+  } else {
+    gradientId = 'gauge-emerald';
+    statusBadgeColor = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    statusText = 'Goal Met';
+  }
+
+  return (
+    <div className="flex flex-col items-center">
+      <svg 
+        width={size} 
+        height={size * 0.65} 
+        viewBox="0 0 220 135" 
+        className="overflow-visible select-none"
+      >
+        <defs>
+          <linearGradient id="gauge-emerald" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#34d399" />
+            <stop offset="100%" stopColor="#059669" />
+          </linearGradient>
+          <linearGradient id="gauge-amber" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#fbbf24" />
+            <stop offset="100%" stopColor="#d97706" />
+          </linearGradient>
+          <linearGradient id="gauge-rose" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#fb7185" />
+            <stop offset="100%" stopColor="#e11d48" />
+          </linearGradient>
+          <filter id="needle-drop-shadow" x="-30%" y="-30%" width="160%" height="160%">
+            <feDropShadow dx="0" dy="1.5" stdDeviation="1.5" floodOpacity="0.25" />
+          </filter>
+        </defs>
+
+        {/* Background Arc Track */}
+        <path
+          d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`}
+          fill="none"
+          stroke="#f1f5f9"
+          strokeWidth={strokeWidth}
+          strokeLinecap="round"
+        />
+
+        {/* Dynamic Filled Progress Arc */}
+        {clampedRate > 0 && (
+          <path
+            d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`}
+            fill="none"
+            stroke={`url(#${gradientId})`}
+            strokeWidth={strokeWidth}
+            strokeDasharray={arcLength}
+            strokeDashoffset={strokeDashoffset}
+            strokeLinecap="round"
+            className="transition-all duration-700 ease-out"
+          />
+        )}
+
+        {/* Target Indicator Pin & Tick */}
+        <line
+          x1={tInnerX}
+          y1={tInnerY}
+          x2={tOuterX}
+          y2={tOuterY}
+          stroke="#6366f1"
+          strokeWidth="3.5"
+          strokeLinecap="round"
+        />
+        <circle cx={tOuterX} cy={tOuterY} r="3" fill="#6366f1" />
+
+        {/* Needle pointer */}
+        <path
+          d={`M ${b1X} ${b1Y} L ${tipX} ${tipY} L ${b2X} ${b2Y} Z`}
+          fill="#0f172a"
+          filter="url(#needle-drop-shadow)"
+          className="transition-all duration-700 ease-out"
+        />
+        <circle cx={cx} cy={cy} r="6.5" fill="#0f172a" />
+        <circle cx={cx} cy={cy} r="2.5" fill="#ffffff" />
+
+        {/* Baseline 0% and 100% min/max ticks */}
+        <text x={cx - r} y={cy + 18} textAnchor="middle" fontSize="10" fontWeight="600" fill="#94a3b8">0%</text>
+        <text x={cx + r} y={cy + 18} textAnchor="middle" fontSize="10" fontWeight="600" fill="#94a3b8">100%</text>
+      </svg>
+
+      {/* Numeric Rate Display */}
+      <div className="-mt-3 flex flex-col items-center text-center">
+        <div className="flex items-baseline gap-1">
+          <span className="text-3xl font-extrabold text-slate-800 tracking-tight">{clampedRate.toFixed(1)}%</span>
+        </div>
+        <div className="flex items-center gap-1.5 mt-1">
+          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold border ${statusBadgeColor}`}>
+            {statusText}
+          </span>
+          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">
+            <span className="w-1.5 h-1.5 rounded-full bg-indigo-600"></span>
+            Target: {clampedTarget}%
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// NORMAL USER DASHBOARD VIEW
 // ==========================================
 function NormalUserDashboardView({ employees, attendances, leaveRequests, user }) {
   const { t } = useLanguage();
@@ -579,6 +743,106 @@ function NormalUserDashboardView({ employees, attendances, leaveRequests, user }
   const myLeaveRequests = useMemo(() => {
     return leaveRequests.filter(req => req.submittedByEmail === user.email || req.empId === myEmployeeRecord?.empId).sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
   }, [leaveRequests, user.email, myEmployeeRecord]);
+
+  // Today's Date in Myanmar Timezone
+  const todayStr = useMemo(() => getMyanmarDateString(), []);
+
+  // Selected Month for Goal Tracking (defaults to current month YYYY-MM)
+  const [selectedMonth, setSelectedMonth] = useState(() => todayStr.slice(0, 7));
+
+  // Target Attendance Goal Percentage (defaults to 90%, persisted in localStorage)
+  const [targetPercentage, setTargetPercentage] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem(`att_goal_${user?.email || 'default'}`);
+      return saved ? Number(saved) : 90;
+    } catch (e) {
+      return 90;
+    }
+  });
+
+  const handleUpdateTarget = (target: number) => {
+    setTargetPercentage(target);
+    try {
+      localStorage.setItem(`att_goal_${user?.email || 'default'}`, String(target));
+    } catch (e) {}
+  };
+
+  // Month navigation helpers
+  const handlePrevMonth = () => {
+    const [y, m] = selectedMonth.split('-').map(Number);
+    const prevDate = new Date(y, m - 2, 1);
+    const newY = prevDate.getFullYear();
+    const newM = String(prevDate.getMonth() + 1).padStart(2, '0');
+    setSelectedMonth(`${newY}-${newM}`);
+  };
+
+  const handleNextMonth = () => {
+    const [y, m] = selectedMonth.split('-').map(Number);
+    const nextDate = new Date(y, m, 1);
+    const newY = nextDate.getFullYear();
+    const newM = String(nextDate.getMonth() + 1).padStart(2, '0');
+    setSelectedMonth(`${newY}-${newM}`);
+  };
+
+  const isCurrentMonth = selectedMonth === todayStr.slice(0, 7);
+
+  const monthLabel = useMemo(() => {
+    const [y, m] = selectedMonth.split('-').map(Number);
+    const d = new Date(y, m - 1, 1);
+    return d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  }, [selectedMonth]);
+
+  // Today's attendance record
+  const todayRecord = useMemo(() => {
+    return myAttendances.find(a => a.date === todayStr);
+  }, [myAttendances, todayStr]);
+
+  // Consecutive attendance streak (Present / Late)
+  const attendanceStreak = useMemo(() => {
+    if (!myAttendances.length) return 0;
+    let streak = 0;
+    for (const record of myAttendances) {
+      if (record.status === 'Present' || record.status === 'Late') {
+        streak++;
+      } else {
+        break;
+      }
+    }
+    return streak;
+  }, [myAttendances]);
+
+  // Monthly attendance calculations
+  const monthRecords = useMemo(() => {
+    return myAttendances.filter(a => a.date.startsWith(selectedMonth));
+  }, [myAttendances, selectedMonth]);
+
+  const monthStats = useMemo(() => {
+    const present = monthRecords.filter(a => a.status === 'Present').length;
+    const late = monthRecords.filter(a => a.status === 'Late').length;
+    const halfDay = monthRecords.filter(a => a.status === 'Half-Day').length;
+    const leave = monthRecords.filter(a => a.status === 'Leave').length;
+    const absent = monthRecords.filter(a => a.status === 'Absent').length;
+    const totalRecorded = monthRecords.length;
+
+    // Effective attended days (Full present, late counts as attended, half-day is 0.5)
+    const effectiveAttended = present + late + halfDay * 0.5;
+
+    // Monthly attendance progress rate (%)
+    const attendanceRate = totalRecorded > 0 ? (effectiveAttended / totalRecorded) * 100 : 0;
+    const diff = attendanceRate - targetPercentage;
+
+    return {
+      present,
+      late,
+      halfDay,
+      leave,
+      absent,
+      totalRecorded,
+      effectiveAttended,
+      attendanceRate,
+      diff
+    };
+  }, [monthRecords, targetPercentage]);
 
   const getStatusColor = (status) => {
     switch(status) {
@@ -619,7 +883,8 @@ function NormalUserDashboardView({ employees, attendances, leaveRequests, user }
 
   return (
     <div className="flex flex-col flex-1 max-w-7xl mx-auto p-4 lg:p-6 pb-24 space-y-6 animate-fadeIn">
-      <div className="flex items-center justify-between">
+      {/* Top Header */}
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h2 className="text-3xl font-bold text-slate-800 tracking-tight">My Dashboard</h2>
           <p className="text-slate-500 mt-1">Welcome back, {myEmployeeRecord.name}</p>
@@ -632,12 +897,266 @@ function NormalUserDashboardView({ employees, attendances, leaveRequests, user }
         </div>
       </div>
 
+      {/* ======================================================== */}
+      {/* DAILY ATTENDANCE GOAL & MONTHLY TRACKING SECTION */}
+      {/* ======================================================== */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 md:p-6 overflow-hidden">
+        {/* Card Header with Controls */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 border-b border-slate-100">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-100 text-indigo-600 flex items-center justify-center shadow-xs">
+              <Target size={22} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-lg text-slate-800">Daily Attendance Goal</h3>
+                <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-100">
+                  {monthLabel}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500">Track monthly progress against your target percentage</p>
+            </div>
+          </div>
+
+          {/* Month Selector & Target Goal Selector */}
+          <div className="flex items-center flex-wrap gap-2.5">
+            {/* Month Navigation */}
+            <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg p-1">
+              <button 
+                onClick={handlePrevMonth}
+                title="Previous Month"
+                className="p-1.5 hover:bg-white text-slate-600 hover:text-slate-900 rounded-md transition-colors"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <span className="text-xs font-semibold px-2 text-slate-700 select-none">
+                {monthLabel}
+              </span>
+              <button 
+                onClick={handleNextMonth}
+                title="Next Month"
+                className="p-1.5 hover:bg-white text-slate-600 hover:text-slate-900 rounded-md transition-colors"
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+
+            {!isCurrentMonth && (
+              <button
+                onClick={() => setSelectedMonth(todayStr.slice(0, 7))}
+                className="text-xs font-medium text-indigo-600 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1.5 rounded-lg border border-indigo-100 transition-colors"
+              >
+                Current Month
+              </button>
+            )}
+
+            {/* Target Goal Segmented Buttons */}
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg">
+              <span className="text-[11px] font-semibold text-slate-500 px-1.5 flex items-center gap-1">
+                <Sliders size={12} /> Target:
+              </span>
+              {[85, 90, 95, 100].map(val => (
+                <button
+                  key={val}
+                  onClick={() => handleUpdateTarget(val)}
+                  className={`text-xs px-2.5 py-1 rounded-md font-semibold transition-all ${
+                    targetPercentage === val 
+                      ? 'bg-white text-indigo-600 shadow-xs border border-slate-200' 
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                  }`}
+                >
+                  {val}%
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* 3-Column Goal Dashboard Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pt-6 items-center">
+          
+          {/* Column 1: Small Gauge Chart (Visual Progress vs Target) */}
+          <div className="lg:col-span-4 flex flex-col items-center justify-center p-4 bg-slate-50/60 rounded-xl border border-slate-100">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
+              Monthly Attendance Meter
+            </span>
+            <AttendanceGaugeChart 
+              rate={monthStats.attendanceRate} 
+              targetPercentage={targetPercentage} 
+              size={210} 
+            />
+
+            {/* Progress Delta Badge */}
+            <div className="mt-4 flex items-center justify-center">
+              {monthStats.totalRecorded === 0 ? (
+                <span className="text-xs text-slate-400">No records for {monthLabel}</span>
+              ) : monthStats.diff >= 0 ? (
+                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
+                  <TrendingUp size={14} />
+                  +{monthStats.diff.toFixed(1)}% Ahead of Goal
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">
+                  <TrendingDown size={14} />
+                  {monthStats.diff.toFixed(1)}% Below Target
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Column 2: Today's Daily Goal & Streak */}
+          <div className="lg:col-span-4 flex flex-col gap-4">
+            {/* Today's Status Banner */}
+            <div className="p-4 rounded-xl border bg-gradient-to-br from-slate-50 to-white border-slate-200/80 shadow-xs">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                  <Clock size={14} className="text-blue-500" />
+                  Today's Attendance Goal
+                </span>
+                <span className="text-xs font-medium text-slate-500">{todayStr}</span>
+              </div>
+
+              {todayRecord ? (
+                <div className="flex items-start gap-3 mt-1">
+                  <div className={`p-2 rounded-xl flex-shrink-0 ${
+                    todayRecord.status === 'Present' ? 'bg-green-100 text-green-700' :
+                    todayRecord.status === 'Late' ? 'bg-orange-100 text-orange-700' :
+                    todayRecord.status === 'Half-Day' ? 'bg-purple-100 text-purple-700' :
+                    todayRecord.status === 'Leave' ? 'bg-yellow-100 text-yellow-700' :
+                    'bg-red-100 text-red-700'
+                  }`}>
+                    {todayRecord.status === 'Present' ? <CheckCircle2 size={22} /> :
+                     todayRecord.status === 'Late' ? <Clock size={22} /> :
+                     todayRecord.status === 'Half-Day' ? <CalendarCheck size={22} /> :
+                     todayRecord.status === 'Leave' ? <FileText size={22} /> :
+                     <AlertTriangle size={22} />}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-bold text-slate-800 text-base">
+                        {todayRecord.status === 'Present' ? "Today's Goal Met!" :
+                         todayRecord.status === 'Late' ? "Attended (Late)" :
+                         todayRecord.status === 'Half-Day' ? "Half-Day Recorded" :
+                         todayRecord.status === 'Leave' ? "On Approved Leave" :
+                         "Marked Absent"}
+                      </h4>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getStatusColor(todayRecord.status)}`}>
+                        {todayRecord.status}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1">
+                      {todayRecord.status === 'Present' 
+                        ? 'Great job! Your presence today contributes to your monthly target.'
+                        : `Logged status for today: ${todayRecord.status}.`}
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-start gap-3 mt-1">
+                  <div className="p-2 rounded-xl bg-blue-50 text-blue-600 flex-shrink-0">
+                    <Clock size={22} />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-slate-800 text-base">Pending Today's Check-in</h4>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Your daily attendance will be recorded by your department supervisor or admin.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Consistency Streak Card */}
+            <div className="p-4 rounded-xl border border-slate-200/80 bg-slate-50/50 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center">
+                  <Flame size={22} />
+                </div>
+                <div>
+                  <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">
+                    Current Streak
+                  </span>
+                  <span className="text-lg font-bold text-slate-800">
+                    {attendanceStreak} Consecutive {attendanceStreak === 1 ? 'Day' : 'Days'}
+                  </span>
+                </div>
+              </div>
+              <span className="text-xs font-medium text-orange-700 bg-orange-50 border border-orange-200 px-2.5 py-1 rounded-full">
+                {attendanceStreak >= 5 ? '🔥 On Fire' : 'Active'}
+              </span>
+            </div>
+          </div>
+
+          {/* Column 3: Monthly Progress vs Target Summary */}
+          <div className="lg:col-span-4 flex flex-col gap-3.5 bg-slate-50/60 p-4 rounded-xl border border-slate-100">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+              Monthly Progress Details
+            </span>
+
+            {/* Target vs Attended Stats */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-xs">
+                <span className="text-xs font-medium text-slate-400 block mb-1">Target Goal</span>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-xl font-bold text-indigo-600">{targetPercentage}%</span>
+                </div>
+                <span className="text-[11px] text-slate-500">Benchmark</span>
+              </div>
+
+              <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-xs">
+                <span className="text-xs font-medium text-slate-400 block mb-1">Attended Days</span>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-xl font-bold text-slate-800">{monthStats.effectiveAttended}</span>
+                  <span className="text-xs text-slate-400">/ {monthStats.totalRecorded}</span>
+                </div>
+                <span className="text-[11px] text-slate-500">recorded this month</span>
+              </div>
+            </div>
+
+            {/* Attendance Breakdown Pills */}
+            <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-xs space-y-2">
+              <span className="text-xs font-semibold text-slate-600 block">Attendance Breakdown:</span>
+              <div className="flex flex-wrap gap-1.5">
+                <span className="px-2 py-0.5 rounded-md text-xs font-medium bg-green-50 text-green-700 border border-green-200">
+                  Present: {monthStats.present}
+                </span>
+                <span className="px-2 py-0.5 rounded-md text-xs font-medium bg-orange-50 text-orange-700 border border-orange-200">
+                  Late: {monthStats.late}
+                </span>
+                <span className="px-2 py-0.5 rounded-md text-xs font-medium bg-purple-50 text-purple-700 border border-purple-200">
+                  Half-Day: {monthStats.halfDay}
+                </span>
+                <span className="px-2 py-0.5 rounded-md text-xs font-medium bg-yellow-50 text-yellow-700 border border-yellow-200">
+                  Leave: {monthStats.leave}
+                </span>
+                <span className="px-2 py-0.5 rounded-md text-xs font-medium bg-red-50 text-red-700 border border-red-200">
+                  Absent: {monthStats.absent}
+                </span>
+              </div>
+            </div>
+
+            {/* Guidance tip */}
+            <div className="flex items-center gap-2 text-xs text-slate-500 bg-white p-2.5 rounded-lg border border-slate-100">
+              <Award size={16} className="text-indigo-500 flex-shrink-0" />
+              <span>
+                {monthStats.diff >= 0 
+                  ? `Target achieved! You are exceeding your ${targetPercentage}% attendance goal.` 
+                  : `Aim for 100% on-time attendance for the remaining days to reach your ${targetPercentage}% target.`}
+              </span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      {/* 2-Column Grid: Attendance History & Leave Requests */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         
         {/* Attendance History */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col max-h-[500px]">
           <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
             <h3 className="font-semibold text-slate-800 flex items-center gap-2"><Calendar size={18} className="text-blue-500"/> Attendance History</h3>
+            <span className="text-xs text-slate-400 font-medium">{myAttendances.length} Records</span>
           </div>
           <div className="overflow-y-auto p-2 flex-col gap-2 flex-grow">
             {myAttendances.length === 0 ? (
@@ -674,6 +1193,7 @@ function NormalUserDashboardView({ employees, attendances, leaveRequests, user }
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col max-h-[500px]">
           <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
             <h3 className="font-semibold text-slate-800 flex items-center gap-2"><FileText size={18} className="text-purple-500"/> Leave Requests Status</h3>
+            <span className="text-xs text-slate-400 font-medium">{myLeaveRequests.length} Requests</span>
           </div>
           <div className="overflow-y-auto p-4 flex-col gap-3 flex-grow">
             {myLeaveRequests.length === 0 ? (
