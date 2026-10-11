@@ -5,7 +5,8 @@ import {
   UploadCloud, Download, Trash2, Edit, AlertTriangle, CheckSquare, 
   Square, Search, Plus, ChevronUp, ChevronDown, ShieldAlert, Key,
   Filter, X, Clock, Sparkles, FileText, LineChart, Calendar, AlertCircle,
-  Target, TrendingUp, TrendingDown, Award, CheckCircle2, Flame, Sliders, ChevronLeft, ChevronRight
+  Target, TrendingUp, TrendingDown, Award, CheckCircle2, Flame, Sliders, ChevronLeft, ChevronRight,
+  ExternalLink, HelpCircle
 } from 'lucide-react';
 import Fuse from 'fuse.js';
 import { GoogleGenAI } from '@google/genai';
@@ -27,22 +28,18 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend 
 } from 'recharts';
 import { motion, AnimatePresence } from 'motion/react';
+import firebaseAppletConfig from '../firebase-applet-config.json';
 
 // --- Firebase Initialization ---
-const firebaseConfig = {
-  apiKey: "AIzaSyDb6tkifR6f3Eu72Fg3_CMF4j6qDzIa0V0",
-  authDomain: "myproject-94586.firebaseapp.com",
-  projectId: "myproject-94586",
-  storageBucket: "myproject-94586.firebasestorage.app",
-  messagingSenderId: "102468237263",
-  appId: "1:102468237263:web:129749aa7b9d4126ac44ba"
-};
-
-const app = initializeApp(firebaseConfig);
+const app = initializeApp(firebaseAppletConfig);
 const auth = getAuth(app);
-const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({tabManager: persistentMultipleTabManager()})
-});
+const db = initializeFirestore(
+  app,
+  {
+    localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+  },
+  firebaseAppletConfig.firestoreDatabaseId || "(default)"
+);
 const storage = getStorage(app);
 const appId = 'attendance-pro-production';
 
@@ -169,6 +166,7 @@ export default function App() {
   const [authMode, setAuthMode] = useState('login'); 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showAuthHelpModal, setShowAuthHelpModal] = useState(false);
 
   const showNotification = (message, type = 'success') => {
     setNotification({ message, type });
@@ -204,9 +202,12 @@ export default function App() {
     const leaveRequestsRef = collection(db, 'artifacts', appId, 'public', 'data', 'leave_requests');
     const settingsRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_settings', 'main_config');
 
-    const handleFirebaseError = (error) => {
-      if (error.code === 'permission-denied') {
-        showNotification("🔴 Firebase Rules တွင် allow read, write: if true; ဟု ပြင်ပေးပါ။", 'error');
+    const handleFirebaseError = (error: any) => {
+      console.error("Firestore error:", error);
+      if (error?.code === 'permission-denied' || error?.message?.includes('permission')) {
+        showNotification("Firebase Permission Error: Firestore Rules ကို 'allow read, write: if true;' အဖြစ် ပြင်ဆင်ပြီးပါပြီ။", 'error');
+      } else {
+        showNotification(error?.message || "Database connection error", 'error');
       }
       setLoading(false);
     };
@@ -263,13 +264,18 @@ export default function App() {
     e.preventDefault();
     try {
       if (authMode === 'signup') {
-        // Check if this is the very first user in the system
-        const usersSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'app_users'));
-        const isFirstUser = usersSnap.empty;
-        const assignedRole = isFirstUser ? 'Super Admin' : 'Normal';
-
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        
+        let assignedRole = 'Normal';
+        try {
+          const usersSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'app_users'));
+          const otherUsers = usersSnap.docs.filter(d => d.id !== userCredential.user.uid);
+          if (otherUsers.length === 0) {
+            assignedRole = 'Super Admin';
+          }
+        } catch (fetchErr) {
+          console.warn("Could not check existing users, assigning default role:", fetchErr);
+        }
+
         // Save to public app_users collection so Super Admins can manage them
         await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'app_users', userCredential.user.uid), {
           email: email,
@@ -282,11 +288,14 @@ export default function App() {
         await signInWithEmailAndPassword(auth, email, password);
         showNotification("Logged in successfully!");
       }
-    } catch (error) {
-      if (error.code === 'auth/email-already-in-use') {
+    } catch (error: any) {
+      if (error?.code === 'auth/email-already-in-use') {
         showNotification("This email is already registered. Please switch to Log In.", 'error');
+      } else if (error?.code === 'auth/operation-not-allowed') {
+        setShowAuthHelpModal(true);
+        showNotification("Firebase Error (auth/operation-not-allowed): Email/Password provider ကို Firebase Console တွင် Enable ပြုလုပ်ပေးရန် လိုအပ်ပါသည်။", 'error');
       } else {
-        showNotification(error.message, 'error');
+        showNotification(error?.message || "Authentication error", 'error');
       }
     }
   };
@@ -299,8 +308,13 @@ export default function App() {
     try {
       await sendPasswordResetEmail(auth, email);
       showNotification("Password reset email sent! Please check your inbox.");
-    } catch (error) {
-      showNotification(error.message, "error");
+    } catch (error: any) {
+      if (error?.code === 'auth/operation-not-allowed') {
+        setShowAuthHelpModal(true);
+        showNotification("Firebase Error (auth/operation-not-allowed): Email provider ကို Firebase Console တွင် Enable ပြုလုပ်ပေးပါ။", 'error');
+      } else {
+        showNotification(error?.message || "Password reset failed", "error");
+      }
     }
   };
 
@@ -320,8 +334,13 @@ export default function App() {
       }
       // Logic for new Google users is handled in the onSnapshot above (Self-heal)
       showNotification("Google Login Successful!");
-    } catch (error) {
-      showNotification("Google Login Failed: " + error.message, 'error');
+    } catch (error: any) {
+      if (error?.code === 'auth/operation-not-allowed') {
+        setShowAuthHelpModal(true);
+        showNotification("Firebase Error (auth/operation-not-allowed): Google provider ကို Firebase Console တွင် Enable ပြုလုပ်ပေးပါ။", 'error');
+      } else {
+        showNotification("Google Login Failed: " + (error?.message || "Authentication failed"), 'error');
+      }
     }
   };
 
@@ -414,7 +433,110 @@ export default function App() {
               {authMode === 'login' ? 'Switch to Sign Up' : t('back_to_login')}
             </button>
           </p>
+
+          <div className="mt-5 pt-4 border-t border-slate-100 flex flex-col items-center">
+            <button 
+              type="button" 
+              onClick={() => setShowAuthHelpModal(true)} 
+              className="text-xs text-amber-800 hover:text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors font-medium"
+            >
+              <HelpCircle size={14} className="text-amber-600" />
+              <span>auth/operation-not-allowed အမှား ဖြေရှင်းနည်း (Guide)</span>
+            </button>
+          </div>
         </motion.div>
+
+        {/* Modal for Firebase Auth Setup Guide */}
+        <AnimatePresence>
+          {showAuthHelpModal && (
+            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 border border-slate-200"
+              >
+                <div className="flex items-start justify-between border-b border-slate-100 pb-4 mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 bg-amber-100 text-amber-700 rounded-xl">
+                      <AlertCircle size={24} />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-bold text-slate-800">auth/operation-not-allowed</h2>
+                      <p className="text-xs text-slate-500">Firebase Authentication Provider Setup Guide</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setShowAuthHelpModal(false)}
+                    className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <div className="space-y-4 text-sm text-slate-600">
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 text-amber-900">
+                    <p className="font-semibold mb-1">အဘယ်ကြောင့် ဤ Error ပေါ်ပေါက်သနည်း?</p>
+                    <p className="text-xs text-amber-800 leading-relaxed">
+                      Firebase Project အသစ်တွင် Sign-in Providers (Email/Password သို့မဟုတ် Google) ကို Console ထဲတွင် မဖွင့်ရသေးသောကြောင့် ဖြစ်ပါသည်။ ဤသည်မှာ Code bug မဟုတ်ဘဲ Firebase Security Setting ဖြစ်ပြီး မိနစ်ဝက်အတွင်း အလွယ်တကူ ဖွင့်နိုင်ပါသည်။
+                    </p>
+                  </div>
+
+                  <div>
+                    <h3 className="font-semibold text-slate-800 mb-2 flex items-center gap-2">
+                      <span>🛠️ ဖြေရှင်းရန် အဆင့် ၄ ဆင့် (Easy Steps):</span>
+                    </h3>
+                    <ol className="space-y-2.5 text-xs text-slate-700">
+                      <li className="flex items-start gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                        <span className="w-5 h-5 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center flex-shrink-0 text-[11px]">1</span>
+                        <div>
+                          <p className="font-medium text-slate-800">Firebase Console သို့ သွားပါ</p>
+                          <p className="text-slate-500">အောက်ပါ အပြာရောင်ခလုတ် <b>"Open Firebase Console"</b> ကို နှိပ်ပါ</p>
+                        </div>
+                      </li>
+                      <li className="flex items-start gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                        <span className="w-5 h-5 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center flex-shrink-0 text-[11px]">2</span>
+                        <div>
+                          <p className="font-medium text-slate-800"><b>Sign-in method</b> tab သို့ ရောက်ရှိပါမည်</p>
+                          <p className="text-slate-500">Authentication မျက်နှာပြင်တွင် Providers စာရင်းကို တွေ့ရပါမည်</p>
+                        </div>
+                      </li>
+                      <li className="flex items-start gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                        <span className="w-5 h-5 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center flex-shrink-0 text-[11px]">3</span>
+                        <div>
+                          <p className="font-medium text-slate-800"><b>Email/Password</b> ကို နှိပ်၍ Enable ပြုလုပ်ပါ</p>
+                          <p className="text-slate-500">ပထမဆုံး toggle switch <b>Enable</b> ကို ဖွင့်ပြီး <b>Save</b> ကို နှိပ်ပါ (Google login သုံးလိုပါက Google provider ကိုလည်း Enable လုပ်နိုင်ပါသည်)</p>
+                        </div>
+                      </li>
+                      <li className="flex items-start gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                        <span className="w-5 h-5 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center flex-shrink-0 text-[11px]">4</span>
+                        <div>
+                          <p className="font-medium text-slate-800">ပြီးပါက ဤ Attendance Pro သို့ ပြန်လာပါ</p>
+                          <p className="text-slate-500">Sign Up သို့မဟုတ် Sign In ကို ပြန်လည်နှိပ်ပါက ချက်ချင်း အောင်မြင်စွာ ဝင်ရောက်နိုင်ပါပြီ!</p>
+                        </div>
+                      </li>
+                    </ol>
+                  </div>
+
+                  <div className="pt-2">
+                    <a 
+                      href={`https://console.firebase.google.com/project/${firebaseAppletConfig.projectId}/authentication/providers`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-colors shadow-md shadow-blue-500/20"
+                    >
+                      <span>Open Firebase Console (Sign-in providers)</span>
+                      <ExternalLink size={16} />
+                    </a>
+                    <p className="text-[11px] text-center text-slate-400 mt-2 font-mono">
+                      Firebase Project ID: {firebaseAppletConfig.projectId}
+                    </p>
+                  </div>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
       </div>
     );
   }
